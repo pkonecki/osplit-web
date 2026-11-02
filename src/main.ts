@@ -53,6 +53,9 @@ let abortSeparation = false;
 let playerProjectId: string | null = null;
 const players = new Map<Stem, HTMLAudioElement>();
 const objectUrls = new Map<Stem, string>();
+const mediaSources = new Map<Stem, MediaElementAudioSourceNode>();
+const stemGains = new Map<Stem, GainNode>();
+let playbackContext: AudioContext | undefined;
 let progressTimer: number | undefined;
 let fileDialogTarget: "source" | "none" = "none";
 
@@ -375,6 +378,10 @@ function releasePlayers(): void {
     player.removeAttribute("src");
     player.load();
   });
+  mediaSources.forEach((source) => source.disconnect());
+  stemGains.forEach((gain) => gain.disconnect());
+  mediaSources.clear();
+  stemGains.clear();
   objectUrls.forEach((url) => URL.revokeObjectURL(url));
   players.clear();
   objectUrls.clear();
@@ -791,7 +798,29 @@ async function playAll(): Promise<void> {
       player.currentTime = 0;
     });
   }
-  await Promise.all([...players.values()].map((player) => player.play()));
+  const context = playbackContext ??= new AudioContext();
+  for (const [stem, player] of players) {
+    if (mediaSources.has(stem)) continue;
+    const source = context.createMediaElementSource(player);
+    const gain = context.createGain();
+    gain.gain.value = player.volume;
+    source.connect(gain).connect(context.destination);
+    mediaSources.set(stem, source);
+    stemGains.set(stem, gain);
+  }
+
+  const resume = context.resume();
+  const startResults = await Promise.allSettled([
+    resume,
+    ...[...players.values()].map((player) => player.play()),
+  ]);
+  const failed = startResults.find((result) => result.status === "rejected");
+  if (failed?.status === "rejected") {
+    await pauseAll();
+    throw new Error(
+      "The browser blocked synchronized playback. Tap Play again to allow audio, or check Brave's autoplay/site audio settings.",
+    );
+  }
 }
 
 async function toggleMute(project: Project, stem: Stem): Promise<void> {
@@ -800,7 +829,12 @@ async function toggleMute(project: Project, stem: Stem): Promise<void> {
     ? project.mutedStems.filter((item) => item !== stem)
     : [...project.mutedStems, stem];
   const player = players.get(stem);
-  if (player) player.volume = muted ? project.volumes[stem] : 0;
+  if (player) {
+    const volume = muted ? project.volumes[stem] : 0;
+    player.volume = volume;
+    const gain = stemGains.get(stem);
+    if (gain) gain.gain.value = volume;
+  }
   selectedProject = await saveProject({ ...project, mutedStems: nextMuted });
   await render();
 }
@@ -816,7 +850,12 @@ async function changeVolume(
     volumes: { ...project.volumes, [stem]: safeValue },
   };
   const player = players.get(stem);
-  if (player) player.volume = updated.mutedStems.includes(stem) ? 0 : safeValue;
+  if (player) {
+    const volume = updated.mutedStems.includes(stem) ? 0 : safeValue;
+    player.volume = volume;
+    const gain = stemGains.get(stem);
+    if (gain) gain.gain.value = volume;
+  }
   selectedProject = await saveProject(updated);
 }
 
