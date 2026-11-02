@@ -1,0 +1,17 @@
+{
+  "name": "OSplit — Local Stem Studio",
+  "short_name": "OSplit",
+  "description": "Split audio into five stems locally in your browser.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#252d23",
+  "theme_color": "#252d23",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

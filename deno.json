@@ -1,0 +1,6 @@
+{
+  "allowScripts": {
+    "allow": ["npm:protobufjs@7.6.6"],
+    "deny": []
+  }
+}

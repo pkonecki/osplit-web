@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#252d23" />
+    <title>OSplit Web — Browser notes</title>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <style>
+      body { max-width: 760px; margin: 3rem auto; padding: 0 1.25rem; background: #10130f; color: #f0f1e9; font: 1rem/1.6 system-ui, sans-serif; }
+      h1, h2 { color: #b7f36b; } a { color: #b7f36b; } code { color: #cad4bc; }
+    </style>
+  </head>
+  <body>
+    <a href="./">← Back to OSplit</a>
+    <h1>OSplit Web</h1>
+    <p>Audio import, stem separation, playback, and export run in your browser. Source files, stems, projects, and selected ONNX models are stored locally in IndexedDB.</p>
+    <h2>Browser requirements</h2>
+    <p>Use a current Chrome, Edge, Firefox, or Safari release. WebGPU is preferred when available; the WebAssembly CPU provider is used as a fallback. Model inference may be slow or exceed memory limits on mobile devices. The first run downloads about 98 MB for Low quality (FP16) or 197 MB for High quality (FP32), plus the ONNX Runtime. Browser storage limits vary.</p>
+    <h2>Background work</h2>
+    <p>Processing runs in a worker while the app is open. Browsers can suspend or terminate tabs, so work is not guaranteed to continue after leaving or closing the app. A stopped task is marked interrupted and can be restarted; source audio and completed project data remain stored locally.</p>
+    <h2>URL download limitations</h2>
+    <p>The browser yt-dlp runtime requires JavaScript Promise Integration and a network connection. Browser-only retrieval is subject to CORS and site restrictions; YouTube and many providers may fail. OSplit does not use a proxy or send media to a processing server. Importing a local audio file is the reliable alternative.</p>
+    <p>yt-dlp browser runtime prerequisites: Chrome 137+, Firefox 153+, or Safari 27+. For privacy and security, downloaded runtime updates are checked against the SHA-256 digest published by PyPI.</p>
+    <h2>Storage and privacy</h2>
+    <p>All projects are scoped to this browser profile and device. Clearing site data removes them. OSplit asks the browser to preserve its storage when supported, but browser quota and eviction policies still apply. Exported WAV files are saved through your browser's download handling.</p>
+  </body>
+</html>
