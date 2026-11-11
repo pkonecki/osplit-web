@@ -1,5 +1,6 @@
 import "./style.css";
 import { mixWavBlobs, resampleStereo } from "./audio-core";
+import { appUrl } from "./paths";
 import {
   completeSeparation,
   deleteProject,
@@ -96,7 +97,7 @@ function registerServiceWorker(): void {
     "serviceWorker" in navigator &&
     (location.protocol === "https:" || location.hostname === "localhost")
   ) {
-    void navigator.serviceWorker.register("/sw.js").catch((error: unknown) => {
+    void navigator.serviceWorker.register(appUrl("sw.js")).catch((error: unknown) => {
       console.warn("Offline app shell could not be registered.", error);
     });
   }
@@ -130,7 +131,7 @@ async function renderProjects(): Promise<string> {
   return `
     <header class="topbar">
       <a class="brand" href="#" aria-label="OSplit home">
-        <span class="brand-mark"><img src="/icon.svg" alt="" /></span>
+        <span class="brand-mark"><img src="${appUrl("icon.svg")}" alt="" /></span>
         <span><strong>OSPLIT</strong><small>ON-DEVICE STEM STUDIO</small></span>
       </a>
       <button class="button subtle" data-action="yt-update" ${
@@ -162,7 +163,7 @@ async function renderProjects(): Promise<string> {
   }
       <p class="notice">Processing runs locally while this app is open. If the browser stops it, project state is saved and you can retry.</p>
     </main>
-    <footer>OSplit Web · local-only projects · <a href="/README-web.html">Browser limitations</a></footer>
+    <footer>OSplit Web · local-only projects · <a href="${appUrl("README-web.html")}">Browser limitations</a></footer>
     ${fileInputMarkup()}
   `;
 }
@@ -194,7 +195,7 @@ function renderDetail(project: Project): string {
   return `
     <header class="topbar">
       <button class="brand brand-button" data-action="home">
-        <span class="brand-mark"><img src="/icon.svg" alt="" /></span>
+        <span class="brand-mark"><img src="${appUrl("icon.svg")}" alt="" /></span>
         <span><strong>OSPLIT</strong><small>ON-DEVICE STEM STUDIO</small></span>
       </button>
       <button class="button subtle" data-action="home" ${
@@ -268,7 +269,7 @@ function renderDetail(project: Project): string {
       ${complete ? renderMixer(project) : ""}
       <p class="notice">The browser may suspend processing when this tab is in the background. Task status is saved, but work is not guaranteed to continue after the tab is closed.</p>
     </main>
-    <footer>OSplit Web · IndexedDB local storage · <a href="/README-web.html">Browser limitations</a></footer>
+    <footer>OSplit Web · IndexedDB local storage · <a href="${appUrl("README-web.html")}">Browser limitations</a></footer>
     ${fileInputMarkup()}
   `;
 }
@@ -354,11 +355,10 @@ async function preparePlayers(project: Project): Promise<void> {
       throw new Error(`The saved ${STEM_LABELS[stem]} audio is missing.`);
     }
     const url = URL.createObjectURL(stored.blob);
+    // Element volume stays at 1: levels are applied by the Web Audio gain nodes,
+    // since mobile browsers ignore `volume` and others would apply it twice.
     const player = new Audio(url);
     player.preload = "auto";
-    player.volume = project.mutedStems.includes(stem)
-      ? 0
-      : project.volumes[stem];
     player.addEventListener("ended", () => pauseAll());
     players.set(stem, player);
     objectUrls.set(stem, url);
@@ -469,7 +469,9 @@ async function handleClick(event: Event): Promise<void> {
         }
         break;
       case "separate":
-        if (selectedProject) void separateProject(selectedProject);
+        if (selectedProject) {
+          void separateProject(selectedProject).catch(showError);
+        }
         break;
       case "cancel":
         if (urlWorker) cancelUrlDownload();
@@ -488,7 +490,7 @@ async function handleClick(event: Event): Promise<void> {
       case "play":
         if ([...players.values()].some((player) => !player.paused)) {
           await pauseAll();
-        } else await playAll();
+        } else if (selectedProject) await playAll(selectedProject);
         updatePlayerDisplay();
         break;
       case "mute":
@@ -537,15 +539,17 @@ async function separateProject(project: Project): Promise<void> {
   abortSeparation = false;
   progress = 0;
   progressLabel = "Preparing audio";
-  selectedProject = await updateProjectTask(project.id, {
-    status: "processing",
-    errorMessage: null,
-    taskProgress: 0,
-    taskStage: "Preparing audio",
-  });
-  await render();
+  const persist = progressPersister(project.id);
+  acquireWakeLock();
 
   try {
+    selectedProject = await updateProjectTask(project.id, {
+      status: "processing",
+      errorMessage: null,
+      taskProgress: 0,
+      taskStage: "Preparing audio",
+    });
+    await render();
     const audioContext = new AudioContext({ sampleRate: 44_100 });
     let decoded: AudioBuffer;
     try {
@@ -578,18 +582,7 @@ async function separateProject(project: Project): Promise<void> {
         if (message.type === "progress") {
           progress = message.progress;
           progressLabel = message.stage;
-          void updateProjectTask(project.id, {
-            status: "processing",
-            taskProgress: message.progress,
-            taskStage: message.stage,
-          }).then((updated) => {
-            if (selectedProject?.id === updated.id) selectedProject = updated;
-          }).catch((error: unknown) => {
-            screenMessage = `Could not save task progress: ${
-              describeError(error)
-            }`;
-            void render();
-          });
+          persist.report(message.progress, message.stage);
           updateProgressDisplay();
         } else if (message.type === "complete") {
           resolve(message.stems);
@@ -609,11 +602,13 @@ async function separateProject(project: Project): Promise<void> {
       }, [samples.buffer]);
     });
 
+    await persist.settled();
     selectedProject = await completeSeparation(project.id, stems);
     progressLabel = "Separation complete";
   } catch (error) {
     const cancelled = error instanceof DOMException &&
       error.name === "AbortError";
+    await persist.settled();
     selectedProject = await updateProjectTask(project.id, {
       status: cancelled ? "interrupted" : "failed",
       taskProgress: progress,
@@ -628,6 +623,7 @@ async function separateProject(project: Project): Promise<void> {
     inferenceWorker = undefined;
     rejectInference = undefined;
     working = false;
+    releaseWakeLock();
     await render();
   }
 }
@@ -639,6 +635,81 @@ function cancelSeparation(): void {
   inferenceWorker = undefined;
   rejectInference?.(new DOMException("Separation cancelled.", "AbortError"));
 }
+
+const PROGRESS_SAVE_INTERVAL_MS = 1000;
+
+/**
+ * Saves task progress at most once per interval, in order. Await `settled()`
+ * before writing the task's final state so a late progress write cannot
+ * overwrite it.
+ */
+function progressPersister(projectId: string): {
+  report(progress: number, stage: string): void;
+  settled(): Promise<void>;
+} {
+  let lastSave = -Infinity;
+  let pending: Promise<void> = Promise.resolve();
+  return {
+    report(progress, stage) {
+      const now = performance.now();
+      if (now - lastSave < PROGRESS_SAVE_INTERVAL_MS) return;
+      lastSave = now;
+      pending = pending.then(async () => {
+        try {
+          const updated = await updateProjectTask(projectId, {
+            status: "processing",
+            taskProgress: progress,
+            taskStage: stage,
+          });
+          if (selectedProject?.id === updated.id) selectedProject = updated;
+        } catch (error) {
+          screenMessage = `Could not save task progress: ${
+            describeError(error)
+          }`;
+          const element = document.querySelector<HTMLElement>(".message span");
+          if (element) element.textContent = screenMessage;
+          else void render();
+        }
+      });
+    },
+    settled: () => pending,
+  };
+}
+
+let wakeLock: WakeLockSentinel | null = null;
+let wakeLockWanted = false;
+
+/** Keeps the screen on during long tasks so the device does not sleep. */
+function acquireWakeLock(): void {
+  wakeLockWanted = true;
+  void requestWakeLock();
+}
+
+function releaseWakeLock(): void {
+  wakeLockWanted = false;
+  void wakeLock?.release().catch(() => undefined);
+  wakeLock = null;
+}
+
+async function requestWakeLock(): Promise<void> {
+  if (!("wakeLock" in navigator) || document.visibilityState !== "visible") {
+    return;
+  }
+  try {
+    const sentinel = await navigator.wakeLock.request("screen");
+    if (wakeLockWanted && !wakeLock) wakeLock = sentinel;
+    else void sentinel.release();
+  } catch {
+    // Wake Lock can be refused (e.g. battery saver); processing continues.
+  }
+}
+
+// The browser drops the wake lock when the page is hidden; take it again on return.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible" || !wakeLockWanted) return;
+  if (wakeLock?.released) wakeLock = null;
+  if (!wakeLock) void requestWakeLock();
+});
 
 function updateProgressDisplay(): void {
   const bar = document.querySelector<HTMLElement>(".progress-track span");
@@ -663,18 +734,20 @@ async function downloadFromUrl(project: Project): Promise<void> {
   if (working) return;
   working = true;
   screenMessage = "Starting browser URL downloader…";
-  selectedProject = await updateProjectTask(project.id, {
-    status: "processing",
-    taskProgress: 0,
-    taskStage: "Starting browser URL downloader",
-    errorMessage: null,
-  });
+  const persist = progressPersister(project.id);
   const id = crypto.randomUUID();
   const worker = new Worker(new URL("./url.worker.ts", import.meta.url), {
     type: "module",
   });
   urlWorker = worker;
+  acquireWakeLock();
   try {
+    selectedProject = await updateProjectTask(project.id, {
+      status: "processing",
+      taskProgress: 0,
+      taskStage: "Starting browser URL downloader",
+      errorMessage: null,
+    });
     await render();
     const downloaded = await new Promise<{ name: string; blob: Blob }>(
       (resolve, reject) => {
@@ -684,20 +757,7 @@ async function downloadFromUrl(project: Project): Promise<void> {
           if (message.id !== id) return;
           if (message.type === "progress") {
             screenMessage = `${message.stage} · ${message.progress}%`;
-            void updateProjectTask(project.id, {
-              status: "processing",
-              taskProgress: message.progress,
-              taskStage: message.stage,
-            }).catch((error: unknown) => {
-              screenMessage = `Could not save download progress: ${
-                describeError(error)
-              }`;
-              const element = document.querySelector<HTMLElement>(
-                ".message span",
-              );
-              if (element) element.textContent = screenMessage;
-              else void render();
-            });
+            persist.report(message.progress, message.stage);
             const element = document.querySelector<HTMLElement>(
               ".message span",
             );
@@ -715,6 +775,7 @@ async function downloadFromUrl(project: Project): Promise<void> {
         worker.postMessage({ type: "download", id, url });
       },
     );
+    await persist.settled();
     selectedProject = await replaceSource(
       project,
       downloaded.blob,
@@ -724,6 +785,7 @@ async function downloadFromUrl(project: Project): Promise<void> {
   } catch (error) {
     const cancelled = error instanceof DOMException &&
       error.name === "AbortError";
+    await persist.settled();
     selectedProject = await updateProjectTask(project.id, {
       status: cancelled ? "interrupted" : "failed",
       taskStage: cancelled ? "Download cancelled" : "Download failed",
@@ -737,6 +799,7 @@ async function downloadFromUrl(project: Project): Promise<void> {
     urlWorker = undefined;
     rejectUrlDownload = undefined;
     working = false;
+    releaseWakeLock();
     await render();
   }
 }
@@ -784,12 +847,20 @@ async function checkYtDlpUpdate(): Promise<void> {
   }
 }
 
-async function playAll(): Promise<void> {
+function stemVolume(project: Project, stem: Stem): number {
+  return project.mutedStems.includes(stem) ? 0 : project.volumes[stem];
+}
+
+function applyStemVolume(project: Project, stem: Stem): void {
+  const gain = stemGains.get(stem);
+  if (gain) gain.gain.value = stemVolume(project, stem);
+}
+
+async function playAll(project: Project): Promise<void> {
   if (!players.size) {
     throw new Error("Separate stems before using the project player.");
   }
-  const active = [...players.values()].filter((player) => player.volume > 0);
-  if (!active.length) {
+  if (![...players.keys()].some((stem) => stemVolume(project, stem) > 0)) {
     throw new Error("Unmute at least one stem before playing.");
   }
   const reference = players.values().next().value as HTMLAudioElement;
@@ -803,7 +874,7 @@ async function playAll(): Promise<void> {
     if (mediaSources.has(stem)) continue;
     const source = context.createMediaElementSource(player);
     const gain = context.createGain();
-    gain.gain.value = player.volume;
+    gain.gain.value = stemVolume(project, stem);
     source.connect(gain).connect(context.destination);
     mediaSources.set(stem, source);
     stemGains.set(stem, gain);
@@ -828,35 +899,10 @@ async function toggleMute(project: Project, stem: Stem): Promise<void> {
   const nextMuted = muted
     ? project.mutedStems.filter((item) => item !== stem)
     : [...project.mutedStems, stem];
-  const player = players.get(stem);
-  if (player) {
-    const volume = muted ? project.volumes[stem] : 0;
-    player.volume = volume;
-    const gain = stemGains.get(stem);
-    if (gain) gain.gain.value = volume;
-  }
-  selectedProject = await saveProject({ ...project, mutedStems: nextMuted });
-  await render();
-}
-
-async function changeVolume(
-  project: Project,
-  stem: Stem,
-  value: number,
-): Promise<void> {
-  const safeValue = Math.max(0, Math.min(1, value));
-  const updated = {
-    ...project,
-    volumes: { ...project.volumes, [stem]: safeValue },
-  };
-  const player = players.get(stem);
-  if (player) {
-    const volume = updated.mutedStems.includes(stem) ? 0 : safeValue;
-    player.volume = volume;
-    const gain = stemGains.get(stem);
-    if (gain) gain.gain.value = volume;
-  }
+  const updated = { ...project, mutedStems: nextMuted };
+  applyStemVolume(updated, stem);
   selectedProject = await saveProject(updated);
+  await render();
 }
 
 function seekAll(seconds: number): void {
@@ -902,26 +948,31 @@ function downloadBlob(blob: Blob, name: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-async function handleInput(event: Event): Promise<void> {
+/** Applies slider moves immediately; `handleChange` saves when released. */
+function handleInput(event: Event): void {
   const target = event.target as HTMLInputElement;
   if (target.id === "seek-bar") seekAll(Number(target.value));
   if (
     target.dataset.action === "volume" && selectedProject && target.dataset.stem
   ) {
-    await changeVolume(
-      selectedProject,
-      target.dataset.stem as Stem,
-      Number(target.value),
-    );
+    const stem = target.dataset.stem as Stem;
+    const value = Math.max(0, Math.min(1, Number(target.value) || 0));
+    selectedProject = {
+      ...selectedProject,
+      volumes: { ...selectedProject.volumes, [stem]: value },
+    };
+    applyStemVolume(selectedProject, stem);
   }
 }
 
-function handleChange(event: Event): void {
+async function handleChange(event: Event): Promise<void> {
   const target = event.target as HTMLInputElement;
   if (target.type === "range" && target.id === "seek-bar") {
     seekAll(Number(target.value));
   }
-  if (target.dataset.action === "volume") void render();
+  if (target.dataset.action === "volume" && selectedProject) {
+    selectedProject = await saveProject(selectedProject);
+  }
 }
 
 function describeError(error: unknown): string {
@@ -937,7 +988,7 @@ function describeError(error: unknown): string {
 function showFatal(error: unknown): void {
   root!.innerHTML = `
     <main class="fatal">
-      <img src="/icon.svg" alt="" />
+      <img src="${appUrl("icon.svg")}" alt="" />
       <h1>OSplit could not open local storage</h1>
       <p>${escapeHtml(describeError(error))}</p>
       <p class="muted">Use a current browser with IndexedDB enabled and available storage.</p>
@@ -984,19 +1035,18 @@ function escapeHtml(value: string): string {
     })[char]!);
 }
 
+function showError(error: unknown): void {
+  screenMessage = describeError(error);
+  void render();
+}
+
 root.addEventListener("click", (event) => {
-  void handleClick(event).catch((error: unknown) => {
-    screenMessage = describeError(error);
-    void render();
-  });
+  void handleClick(event).catch(showError);
 });
-root.addEventListener("input", (event) => {
-  void handleInput(event).catch((error: unknown) => {
-    screenMessage = describeError(error);
-    void render();
-  });
+root.addEventListener("input", handleInput);
+root.addEventListener("change", (event) => {
+  void handleChange(event).catch(showError);
 });
-root.addEventListener("change", handleChange);
 root.addEventListener("change", (event) => {
   if ((event.target as HTMLElement).id === "audio-file") {
     void handleFileChange(event);

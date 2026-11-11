@@ -59,24 +59,45 @@ For further browser details, see
 
 The PWA is a static site; it needs no application server or database. Build it
 with `deno task build`, then publish the contents of `dist/` to a static host
-over HTTPS. Deploy it at the domain root (for example,
-`https://osplit.example.com/`): worker, model, and yt-dlp asset URLs are
-root-relative, so a subdirectory deployment needs path configuration changes.
+over HTTPS. By default the build expects the domain root (for example,
+`https://osplit.example.com/`). To serve it from a sub-path, set `BASE_PATH`
+when building:
 
-The host must send these headers on the app and model responses:
+```powershell
+$env:BASE_PATH = "/osplit-web/"; deno task build
+```
+
+The host should send these headers on the app and model responses:
 
 ```text
 Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
 ```
 
-They enable cross-origin isolation used by the browser runtime. The build
+They enable cross-origin isolation, which lets the WebAssembly fallback use
+several CPU threads. Without them the app still works, but CPU separation runs
+on a single thread and is slower; WebGPU is not affected. The build
 contains around 295 MB of model files, plus the ONNX Runtime WASM asset and
 yt-dlp wheel; check the host's upload, storage, and individual-file size limits.
 Hashed files under `assets/` can be cached for a long time. Model URLs are
 stable across releases, so use a shorter cache lifetime for them; keep
 `index.html`, `sw.js`, and `manifest.webmanifest` revalidating so users receive
 app updates.
+
+### GitHub Pages
+
+The CI workflow deploys to GitHub Pages on every push to `main`, after the
+checks pass. Enable it once under the repository's **Settings → Pages →
+Source: GitHub Actions**. The workflow sets `BASE_PATH` from the Pages
+configuration, so both project sites (`https://<user>.github.io/<repo>/`) and
+custom domains work.
+
+GitHub Pages cannot send the cross-origin isolation headers above, so CPU
+separation is single-threaded there. Each new user downloads 98–197 MB of
+models, which counts towards GitHub Pages' soft bandwidth limit of 100 GB per
+month.
+
+### Nginx and Docker
 
 For Nginx, the included [`deploy/nginx.conf`](./deploy/nginx.conf) demonstrates
 the required headers and cache behavior. If configuring another static host,
