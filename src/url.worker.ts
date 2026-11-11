@@ -1,4 +1,5 @@
 import { createYtDlp } from "@project516/yt-dlp-wasm";
+import { appUrl } from "./paths";
 import { getModel, putModel } from "./storage";
 
 type Request =
@@ -24,12 +25,13 @@ async function createRuntime(id: string) {
   if (cached) {
     wheelURL = URL.createObjectURL(cached.blob);
   } else {
-    const metadataResponse = await fetch("/yt-dlp/wheel.json");
+    const metadataResponse = await fetch(appUrl("yt-dlp/wheel.json"));
     if (!metadataResponse.ok) {
       throw new Error("The bundled yt-dlp runtime is missing.");
     }
     const metadata = await metadataResponse.json() as { wheel: string };
-    wheelURL = new URL(`/yt-dlp/${metadata.wheel}`, self.location.origin).href;
+    wheelURL = new URL(appUrl(`yt-dlp/${metadata.wheel}`), self.location.origin)
+      .href;
   }
   postMessage(
     {
@@ -152,7 +154,7 @@ async function update(
     const version = metadata.info.version;
     if (!version) throw new Error("PyPI did not provide an yt-dlp version.");
 
-    const bundledResponse = await fetch("/yt-dlp/wheel.json");
+    const bundledResponse = await fetch(appUrl("yt-dlp/wheel.json"));
     const bundled = bundledResponse.ok
       ? await bundledResponse.json() as { wheel: string }
       : { wheel: "" };

@@ -20,6 +20,15 @@ const ytDlpRoot = resolve(
   "yt-dlp-wasm",
   "dist",
 );
+/**
+ * Path the site is served from, from the BASE_PATH environment variable:
+ * "/" by default, or e.g. "/osplit-web/" for a GitHub Pages project site.
+ */
+function basePath(value: string | undefined): string {
+  const trimmed = (value ?? "").trim().replace(/^\/+|\/+$/g, "");
+  return trimmed ? `/${trimmed}/` : "/";
+}
+const base = basePath(process.env.BASE_PATH);
 const crossOriginHeaders = {
   "Cross-Origin-Opener-Policy": "same-origin",
   "Cross-Origin-Embedder-Policy": "require-corp",
@@ -47,12 +56,12 @@ function replaceOnce(source: string, token: string, value: string): string {
  */
 function stampServiceWorker(dist: string): void {
   const assets = readdirSync(resolve(dist, "assets")).sort().map((name) =>
-    `/assets/${name}`
+    `${base}assets/${name}`
   );
   // The ONNX Runtime WASM file is large; cache it on first use, not on install.
   const precache = [
     ...assets.filter((path) => !path.endsWith(".wasm")),
-    "/README-web.html",
+    `${base}README-web.html`,
   ];
   const hash = createHash("sha256").update(assets.join("\n"));
   for (const file of SHELL_FILES) hash.update(readFileSync(resolve(dist, file)));
@@ -75,7 +84,9 @@ function serveAndPackageModels(): Plugin {
     name: "osplit-model-assets",
     configureServer(server) {
       server.middlewares.use((request, response, next) => {
-        const url = request.url?.split("?")[0] ?? "";
+        const fullUrl = request.url?.split("?")[0] ?? "";
+        if (!fullUrl.startsWith(base)) return next();
+        const url = `/${fullUrl.slice(base.length)}`;
         if (url.startsWith("/yt-dlp/")) {
           const requested = decodeURIComponent(url.slice("/yt-dlp/".length));
           if (
@@ -134,7 +145,7 @@ function serveAndPackageModels(): Plugin {
 }
 
 export default defineConfig({
-  base: "./",
+  base,
   publicDir: resolve(webDirectory, "public"),
   plugins: [serveAndPackageModels()],
   server: { headers: crossOriginHeaders },

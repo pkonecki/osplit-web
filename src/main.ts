@@ -1,5 +1,6 @@
 import "./style.css";
 import { mixWavBlobs, resampleStereo } from "./audio-core";
+import { appUrl } from "./paths";
 import {
   completeSeparation,
   deleteProject,
@@ -96,7 +97,7 @@ function registerServiceWorker(): void {
     "serviceWorker" in navigator &&
     (location.protocol === "https:" || location.hostname === "localhost")
   ) {
-    void navigator.serviceWorker.register("/sw.js").catch((error: unknown) => {
+    void navigator.serviceWorker.register(appUrl("sw.js")).catch((error: unknown) => {
       console.warn("Offline app shell could not be registered.", error);
     });
   }
@@ -130,7 +131,7 @@ async function renderProjects(): Promise<string> {
   return `
     <header class="topbar">
       <a class="brand" href="#" aria-label="OSplit home">
-        <span class="brand-mark"><img src="/icon.svg" alt="" /></span>
+        <span class="brand-mark"><img src="${appUrl("icon.svg")}" alt="" /></span>
         <span><strong>OSPLIT</strong><small>ON-DEVICE STEM STUDIO</small></span>
       </a>
       <button class="button subtle" data-action="yt-update" ${
@@ -162,7 +163,7 @@ async function renderProjects(): Promise<string> {
   }
       <p class="notice">Processing runs locally while this app is open. If the browser stops it, project state is saved and you can retry.</p>
     </main>
-    <footer>OSplit Web · local-only projects · <a href="/README-web.html">Browser limitations</a></footer>
+    <footer>OSplit Web · local-only projects · <a href="${appUrl("README-web.html")}">Browser limitations</a></footer>
     ${fileInputMarkup()}
   `;
 }
@@ -194,7 +195,7 @@ function renderDetail(project: Project): string {
   return `
     <header class="topbar">
       <button class="brand brand-button" data-action="home">
-        <span class="brand-mark"><img src="/icon.svg" alt="" /></span>
+        <span class="brand-mark"><img src="${appUrl("icon.svg")}" alt="" /></span>
         <span><strong>OSPLIT</strong><small>ON-DEVICE STEM STUDIO</small></span>
       </button>
       <button class="button subtle" data-action="home" ${
@@ -268,7 +269,7 @@ function renderDetail(project: Project): string {
       ${complete ? renderMixer(project) : ""}
       <p class="notice">The browser may suspend processing when this tab is in the background. Task status is saved, but work is not guaranteed to continue after the tab is closed.</p>
     </main>
-    <footer>OSplit Web · IndexedDB local storage · <a href="/README-web.html">Browser limitations</a></footer>
+    <footer>OSplit Web · IndexedDB local storage · <a href="${appUrl("README-web.html")}">Browser limitations</a></footer>
     ${fileInputMarkup()}
   `;
 }
@@ -987,7 +988,7 @@ function describeError(error: unknown): string {
 function showFatal(error: unknown): void {
   root!.innerHTML = `
     <main class="fatal">
-      <img src="/icon.svg" alt="" />
+      <img src="${appUrl("icon.svg")}" alt="" />
       <h1>OSplit could not open local storage</h1>
       <p>${escapeHtml(describeError(error))}</p>
       <p class="muted">Use a current browser with IndexedDB enabled and available storage.</p>

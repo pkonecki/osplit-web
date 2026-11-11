@@ -19,6 +19,7 @@ import {
   modelLoadedProgress,
   separationProgress,
 } from "./progress";
+import { appUrl } from "./paths";
 import { getModel, putModel } from "./storage";
 import { type Quality, type Stem, STEMS } from "./types";
 
@@ -160,7 +161,7 @@ async function modelBytes(
   if (cached) return cached.blob.arrayBuffer();
   checkCancelled(id);
 
-  const response = await fetch(`/models/${key}`);
+  const response = await fetch(appUrl(`models/${key}`));
   if (!response.ok) {
     throw new Error(`Could not download the ${stem} ${quality} model.`);
   }
