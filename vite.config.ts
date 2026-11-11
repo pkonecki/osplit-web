@@ -5,6 +5,7 @@ import {
   existsSync,
   readdirSync,
   readFileSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
@@ -79,9 +80,40 @@ function stampServiceWorker(dist: string): void {
   writeFileSync(swPath, sw);
 }
 
+const LFS_POINTER_PREFIX = "version https://git-lfs.github.com/spec/v1";
+
+function isLfsPointer(file: string): boolean {
+  if (statSync(file).size > 1024) return false;
+  return readFileSync(file, "utf8").startsWith(LFS_POINTER_PREFIX);
+}
+
+/** Fails early when the models were checked out without Git LFS. */
+function assertModelsPresent(): void {
+  const pointers = readdirSync(modelRoot, { recursive: true, encoding: "utf8" })
+    .filter((name) => name.endsWith(".onnx"))
+    .filter((name) => isLfsPointer(resolve(modelRoot, name)));
+  if (pointers.length) {
+    throw new Error(
+      `Model files are Git LFS pointers, not model data (${
+        pointers.join(", ")
+      }). Install Git LFS and run "git lfs pull" before building.`,
+    );
+  }
+}
+
 function serveAndPackageModels(): Plugin {
+  // Packaging runs only after a successful build, so an earlier error (such as
+  // missing models) is reported instead of a follow-up packaging failure.
+  let buildSucceeded = false;
   return {
     name: "osplit-model-assets",
+    buildStart() {
+      buildSucceeded = false;
+      assertModelsPresent();
+    },
+    buildEnd(error) {
+      buildSucceeded = !error;
+    },
     configureServer(server) {
       server.middlewares.use((request, response, next) => {
         const fullUrl = request.url?.split("?")[0] ?? "";
@@ -134,6 +166,7 @@ function serveAndPackageModels(): Plugin {
       });
     },
     closeBundle() {
+      if (!buildSucceeded) return;
       stampServiceWorker(resolve(webDirectory, "dist"));
       const output = resolve(webDirectory, "dist", "models");
       cpSync(modelRoot, output, { recursive: true });

@@ -6,6 +6,17 @@ source audio, stems, and cached models are stored in browser IndexedDB.
 
 ## Run locally
 
+The ONNX models in `models/` are stored with [Git LFS](https://git-lfs.com/).
+Install Git LFS before cloning, or fetch the models in an existing clone:
+
+```powershell
+git lfs install
+git lfs pull
+```
+
+The dev server and build stop with an error if the models are still LFS pointer
+files.
+
 Use Deno 2.9+ from this directory:
 
 ```powershell
