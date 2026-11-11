@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    name: Type check, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Models are needed for the build; this also covers a future move to Git LFS.
+          lfs: true
+
+      - uses: denoland/setup-deno@v2
+        with:
+          # Keep in sync with the Deno image in the Dockerfile.
+          deno-version: v2.9.3
+          cache: true
+
+      - name: Install dependencies
+        run: deno install --frozen
+
+      - name: Type check
+        run: deno task check
+
+      - name: Unit tests
+        run: deno task test
+
+      - name: Production build
+        run: deno task build
+
+      - name: Check build output
+        run: |
+          set -euo pipefail
+          for file in index.html sw.js manifest.webmanifest yt-dlp/wheel.json; do
+            test -s "dist/$file" || { echo "::error::dist/$file is missing"; exit 1; }
+          done
+          for quality in fp16 fp32; do
+            count=$(find "dist/models/$quality" -name '*.onnx' -size +1M | wc -l)
+            if [ "$count" -ne 5 ]; then
+              echo "::error::Expected 5 $quality models over 1 MB in dist/models/$quality, found $count"
+              exit 1
+            fi
+          done
+          ls dist/assets/*.wasm >/dev/null
+          du -sh dist
+
+  docker:
+    name: Docker image and headers
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          push: false
+          tags: osplit-web:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start container
+        run: |
+          docker run -d --name osplit -p 8080:8080 osplit-web:ci
+          for attempt in $(seq 1 30); do
+            curl -fsS -o /dev/null http://127.0.0.1:8080/ && exit 0
+            sleep 1
+          done
+          docker logs osplit
+          exit 1
+
+      - name: Check cross-origin isolation and cache headers
+        run: |
+          set -euo pipefail
+          expect_header() {
+            local path="$1" header="$2"
+            local headers
+            headers=$(curl -fsS -D - -o /dev/null "http://127.0.0.1:8080$path")
+            if ! grep -qi "^$header" <<<"$headers"; then
+              echo "::error::$path is missing header '$header'"
+              echo "$headers"
+              exit 1
+            fi
+          }
+          asset=$(curl -fsS http://127.0.0.1:8080/ | grep -o '/assets/index-[^"]*\.js' | head -n 1)
+          test -n "$asset"
+          for path in / /sw.js /manifest.webmanifest "$asset" /models/fp16/bass.fp16.onnx; do
+            expect_header "$path" "Cross-Origin-Opener-Policy: same-origin"
+            expect_header "$path" "Cross-Origin-Embedder-Policy: require-corp"
+          done
+          expect_header / "Cache-Control: no-cache"
+          expect_header /sw.js "Cache-Control: no-cache"
+          expect_header "$asset" "Cache-Control: public, max-age=31536000, immutable"
+          expect_header /models/fp16/bass.fp16.onnx "Cache-Control: public, max-age=86400"
+
+      - name: Container logs
+        if: always()
+        run: docker logs osplit || true
