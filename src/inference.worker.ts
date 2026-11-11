@@ -1,4 +1,6 @@
 import * as ort from "onnxruntime-web";
+import ortWasmModuleUrl from "onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs?url";
+import ortWasmUrl from "onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm?url";
 import {
   CHANNELS,
   encodeWav,
@@ -27,6 +29,10 @@ type WorkerResponse =
 
 const cancelled = new Set<string>();
 const STEM_INDEX = new Map(STEMS.map((stem, index) => [stem, index]));
+
+// Load ONNX Runtime's WASM glue from its own file. With the copy embedded in this
+// bundle, its worker threads would start this worker script instead and crash.
+ort.env.wasm.wasmPaths = { mjs: ortWasmModuleUrl, wasm: ortWasmUrl };
 
 self.addEventListener("message", (event: MessageEvent<WorkerRequest>) => {
   if (event.data.type === "cancel") {
