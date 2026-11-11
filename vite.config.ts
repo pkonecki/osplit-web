@@ -1,4 +1,12 @@
-import { cpSync, createReadStream, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  cpSync,
+  createReadStream,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
@@ -12,17 +20,73 @@ const ytDlpRoot = resolve(
   "yt-dlp-wasm",
   "dist",
 );
+/**
+ * Path the site is served from, from the BASE_PATH environment variable:
+ * "/" by default, or e.g. "/osplit-web/" for a GitHub Pages project site.
+ */
+function basePath(value: string | undefined): string {
+  const trimmed = (value ?? "").trim().replace(/^\/+|\/+$/g, "");
+  return trimmed ? `/${trimmed}/` : "/";
+}
+const base = basePath(process.env.BASE_PATH);
 const crossOriginHeaders = {
   "Cross-Origin-Opener-Policy": "same-origin",
   "Cross-Origin-Embedder-Policy": "require-corp",
 };
+
+/** Public files the service worker precaches; their content versions the cache. */
+const SHELL_FILES = [
+  "index.html",
+  "manifest.webmanifest",
+  "icon.svg",
+  "README-web.html",
+];
+
+function replaceOnce(source: string, token: string, value: string): string {
+  if (source.split(token).length !== 2) {
+    throw new Error(`Expected one "${token}" in sw.js.`);
+  }
+  return source.replace(token, () => value);
+}
+
+/**
+ * Writes the build's asset list and a version derived from the build output
+ * into dist/sw.js, so each release gets a fresh shell cache and stale assets
+ * are removed.
+ */
+function stampServiceWorker(dist: string): void {
+  const assets = readdirSync(resolve(dist, "assets")).sort().map((name) =>
+    `${base}assets/${name}`
+  );
+  // The ONNX Runtime WASM file is large; cache it on first use, not on install.
+  const precache = [
+    ...assets.filter((path) => !path.endsWith(".wasm")),
+    `${base}README-web.html`,
+  ];
+  const hash = createHash("sha256").update(assets.join("\n"));
+  for (const file of SHELL_FILES) hash.update(readFileSync(resolve(dist, file)));
+  const buildId = hash.digest("hex").slice(0, 12);
+
+  const swPath = resolve(dist, "sw.js");
+  let sw = readFileSync(swPath, "utf8");
+  sw = replaceOnce(sw, 'const BUILD_ID = "dev";', `const BUILD_ID = "${buildId}";`);
+  sw = replaceOnce(
+    sw,
+    "/* __OSPLIT_PRECACHE__ */ []",
+    JSON.stringify(precache),
+  );
+  sw = replaceOnce(sw, "/* __OSPLIT_ASSETS__ */ []", JSON.stringify(assets));
+  writeFileSync(swPath, sw);
+}
 
 function serveAndPackageModels(): Plugin {
   return {
     name: "osplit-model-assets",
     configureServer(server) {
       server.middlewares.use((request, response, next) => {
-        const url = request.url?.split("?")[0] ?? "";
+        const fullUrl = request.url?.split("?")[0] ?? "";
+        if (!fullUrl.startsWith(base)) return next();
+        const url = `/${fullUrl.slice(base.length)}`;
         if (url.startsWith("/yt-dlp/")) {
           const requested = decodeURIComponent(url.slice("/yt-dlp/".length));
           if (
@@ -70,6 +134,7 @@ function serveAndPackageModels(): Plugin {
       });
     },
     closeBundle() {
+      stampServiceWorker(resolve(webDirectory, "dist"));
       const output = resolve(webDirectory, "dist", "models");
       cpSync(modelRoot, output, { recursive: true });
       cpSync(ytDlpRoot, resolve(webDirectory, "dist", "yt-dlp"), {
@@ -80,7 +145,7 @@ function serveAndPackageModels(): Plugin {
 }
 
 export default defineConfig({
-  base: "./",
+  base,
   publicDir: resolve(webDirectory, "public"),
   plugins: [serveAndPackageModels()],
   server: { headers: crossOriginHeaders },
