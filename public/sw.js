@@ -14,6 +14,30 @@ const BASE = new URL(self.registration.scope).pathname;
 const SHELL = [BASE, `${BASE}manifest.webmanifest`, `${BASE}icon.svg`, ...PRECACHE];
 const currentAssets = new Set(ASSETS);
 
+// Hosts such as GitHub Pages cannot send the cross-origin isolation headers
+// that multithreaded WebAssembly needs. Adding them to the responses this
+// worker serves isolates every page load after the first; the page reloads
+// once when the worker takes control (see src/isolation.ts). On hosts that
+// already send them, this changes nothing.
+const ISOLATION_HEADERS = [
+  ["Cross-Origin-Opener-Policy", "same-origin"],
+  ["Cross-Origin-Embedder-Policy", "require-corp"],
+];
+
+function withIsolationHeaders(response) {
+  // Opaque and redirect responses cannot be rebuilt.
+  if (!response || response.status === 0 || response.type === "opaqueredirect") {
+    return response;
+  }
+  const headers = new Headers(response.headers);
+  for (const [name, value] of ISOLATION_HEADERS) headers.set(name, value);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(SHELL_CACHE)
@@ -68,12 +92,14 @@ self.addEventListener("fetch", (event) => {
           const copy = response.clone();
           void caches.open(SHELL_CACHE).then((cache) => cache.put(cacheKey, copy));
         }
-        return response;
+        return withIsolationHeaders(response);
       }).catch(async () =>
-        (await caches.match(cacheKey)) ?? (await caches.match(BASE)) ??
-          new Response("OSplit is not available offline yet.", {
-            status: 503,
-          })
+        withIsolationHeaders(
+          (await caches.match(cacheKey)) ?? (await caches.match(BASE)) ??
+            new Response("OSplit is not available offline yet.", {
+              status: 503,
+            }),
+        )
       ),
     );
     return;
@@ -81,13 +107,13 @@ self.addEventListener("fetch", (event) => {
 
   event.respondWith(
     caches.match(request).then((cached) => {
-      if (cached) return cached;
+      if (cached) return withIsolationHeaders(cached);
       return fetch(request).then((response) => {
         if (response.ok && currentAssets.has(url.pathname)) {
           const copy = response.clone();
           void caches.open(ASSET_CACHE).then((cache) => cache.put(request, copy));
         }
-        return response;
+        return withIsolationHeaders(response);
       });
     }),
   );

@@ -75,8 +75,9 @@ Cross-Origin-Embedder-Policy: require-corp
 ```
 
 They enable cross-origin isolation, which lets the WebAssembly fallback use
-several CPU threads. Without them the app still works, but CPU separation runs
-on a single thread and is slower; WebGPU is not affected. The build
+several CPU threads. If the host cannot send them, the service worker adds
+them (see GitHub Pages below); without isolation the app still works, but CPU
+separation runs on a single thread and is slower. The build
 contains around 295 MB of model files, plus the ONNX Runtime WASM asset and
 yt-dlp wheel; check the host's upload, storage, and individual-file size limits.
 Hashed files under `assets/` can be cached for a long time. Model URLs are
@@ -92,10 +93,15 @@ Source: GitHub Actions**. The workflow sets `BASE_PATH` from the Pages
 configuration, so both project sites (`https://<user>.github.io/<repo>/`) and
 custom domains work.
 
-GitHub Pages cannot send the cross-origin isolation headers above, so CPU
-separation is single-threaded there. Each new user downloads 98–197 MB of
-models, which counts towards GitHub Pages' soft bandwidth limit of 100 GB per
-month.
+GitHub Pages cannot send the cross-origin isolation headers above, so the
+service worker adds them to the responses it serves. The first visit is not
+isolated yet: the app reloads once when the service worker takes control, and
+later visits, offline ones included, are isolated. A browser that ignores
+headers added by a service worker is reloaded at most once and then runs CPU
+separation on a single thread.
+
+Each new user downloads 98–197 MB of models, which counts towards GitHub
+Pages' soft bandwidth limit of 100 GB per month.
 
 ### Nginx and Docker
 
