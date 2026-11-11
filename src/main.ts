@@ -1,5 +1,6 @@
 import "./style.css";
 import { mixWavBlobs, resampleStereo } from "./audio-core";
+import { enableIsolationReload } from "./isolation";
 import { appUrl } from "./paths";
 import {
   completeSeparation,
@@ -100,6 +101,7 @@ function registerServiceWorker(): void {
     void navigator.serviceWorker.register(appUrl("sw.js")).catch((error: unknown) => {
       console.warn("Offline app shell could not be registered.", error);
     });
+    enableIsolationReload(() => working);
   }
 }
 
