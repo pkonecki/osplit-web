@@ -14,6 +14,11 @@ import {
   SAMPLES_PER_SEGMENT,
   SEGMENT_FRAMES,
 } from "./audio-core";
+import {
+  modelDownloadProgress,
+  modelLoadedProgress,
+  separationProgress,
+} from "./progress";
 import { getModel, putModel } from "./storage";
 import { type Quality, type Stem, STEMS } from "./types";
 
@@ -34,6 +39,26 @@ const STEM_INDEX = new Map(STEMS.map((stem, index) => [stem, index]));
 // bundle, its worker threads would start this worker script instead and crash.
 ort.env.wasm.wasmPaths = { mjs: ortWasmModuleUrl, wasm: ortWasmUrl };
 
+// Must be set before the first session initializes the WASM runtime, which also
+// backs the WebGPU provider. Matches ONNX Runtime's own default thread count.
+ort.env.wasm.numThreads = crossOriginIsolated
+  ? Math.min(4, Math.ceil((navigator.hardwareConcurrency || 1) / 2))
+  : 1;
+
+interface GpuNavigator {
+  gpu?: { requestAdapter(): Promise<unknown | null> };
+}
+
+async function preferredProvider(): Promise<"webgpu" | "wasm"> {
+  const gpu = (navigator as GpuNavigator).gpu;
+  if (!gpu) return "wasm";
+  try {
+    return (await gpu.requestAdapter()) ? "webgpu" : "wasm";
+  } catch {
+    return "wasm";
+  }
+}
+
 self.addEventListener("message", (event: MessageEvent<WorkerRequest>) => {
   if (event.data.type === "cancel") {
     cancelled.add(event.data.id);
@@ -47,9 +72,10 @@ async function separate(
 ): Promise<void> {
   const { id, quality } = request;
   let sessions: Partial<Record<Stem, ort.InferenceSession>> = {};
-  let provider: "webgpu" | "wasm" = "gpu" in navigator ? "webgpu" : "wasm";
+  let provider: "webgpu" | "wasm" = "wasm";
   try {
     report(id, "Loading models", 0);
+    provider = await preferredProvider();
     try {
       sessions = await loadSessions(quality, id, provider);
     } catch (error) {
@@ -111,9 +137,9 @@ async function loadSessions(
     for (let index = 0; index < STEMS.length; index++) {
       checkCancelled(id);
       const stem = STEMS[index];
-      const bytes = await modelBytes(quality, stem, id);
+      const bytes = await modelBytes(quality, stem, id, index);
       sessions[stem] = await createSession(bytes, provider);
-      report(id, "Loading models", Math.round((index + 1) * 8 / STEMS.length));
+      report(id, "Loading models", modelLoadedProgress(index, STEMS.length));
     }
     return sessions;
   } catch (error) {
@@ -126,6 +152,7 @@ async function modelBytes(
   quality: Quality,
   stem: Stem,
   id: string,
+  modelIndex: number,
 ): Promise<ArrayBuffer> {
   const name = quality === "fp16" ? `${stem}.fp16.onnx` : `${stem}.onnx`;
   const key = `${quality}/${name}`;
@@ -141,6 +168,7 @@ async function modelBytes(
   if (!reader) throw new Error(`Could not read the ${stem} model download.`);
   const chunks: Uint8Array[] = [];
   let downloaded = 0;
+  let lastReported = -1;
   const total = Number(response.headers.get("content-length")) || 0;
   while (true) {
     checkCancelled(id);
@@ -149,12 +177,12 @@ async function modelBytes(
     if (value) {
       chunks.push(value);
       downloaded += value.length;
-      if (total > 0) {
-        report(
-          id,
-          `Downloading ${stem} model`,
-          Math.max(0, Math.min(7, Math.floor((downloaded / total) * 7))),
-        );
+      const progress = total > 0
+        ? modelDownloadProgress(modelIndex, STEMS.length, downloaded / total)
+        : modelDownloadProgress(modelIndex, STEMS.length, 0);
+      if (progress !== lastReported) {
+        lastReported = progress;
+        report(id, `Downloading ${stem} model`, progress);
       }
     }
   }
@@ -185,9 +213,6 @@ async function createSession(
   model: ArrayBuffer,
   provider: "webgpu" | "wasm",
 ): Promise<ort.InferenceSession> {
-  if (provider === "wasm") {
-    ort.env.wasm.numThreads = crossOriginIsolated ? 2 : 1;
-  }
   return ort.InferenceSession.create(model, {
     executionProviders: [provider],
     graphOptimizationLevel: "all",
@@ -374,7 +399,7 @@ async function runSeparation(
     report(
       id,
       `Separating · ${quality.toUpperCase()}`,
-      10 + Math.round((chunk + 1) * 90 / segmentCount),
+      separationProgress(chunk + 1, segmentCount),
     );
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }

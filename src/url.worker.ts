@@ -11,6 +11,8 @@ type Response =
   | { type: "updated"; id: string; version: string }
   | { type: "error"; id: string; message: string };
 
+const UNSUPPORTED_BROWSER = "UnsupportedBrowserError";
+
 self.addEventListener("message", (event: MessageEvent<Request>) => {
   if (event.data.type === "download") void download(event.data);
   else void update(event.data);
@@ -52,13 +54,13 @@ async function createRuntime(id: string) {
       ? error.message
       : "yt-dlp could not start.";
     if (/JSPI|version|not supported/i.test(detail)) {
-      throw new Error(
+      const unsupported = new Error(
         "Client URL downloading needs a browser with JavaScript Promise Integration (Chrome 137+, Firefox 153+, or Safari 27+). You can still import a local audio file.",
       );
+      unsupported.name = UNSUPPORTED_BROWSER;
+      throw unsupported;
     }
-    throw new Error(
-      `${detail} Browser-side URL access may also be blocked by CORS.`,
-    );
+    throw new Error(detail);
   }
 }
 
@@ -117,9 +119,11 @@ async function download(
       {
         type: "error",
         id,
-        message: error instanceof Error
-          ? `${error.message} Browser-only URL downloads may not work for YouTube or other sites without CORS.`
-          : "Browser-side URL download failed.",
+        message: !(error instanceof Error)
+          ? "Browser-side URL download failed."
+          : error.name === UNSUPPORTED_BROWSER
+          ? error.message
+          : `${error.message} Browser-only URL downloads may not work for YouTube or other sites without CORS.`,
       } satisfies Response,
     );
   } finally {

@@ -1,4 +1,12 @@
-import { cpSync, createReadStream, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  cpSync,
+  createReadStream,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
@@ -16,6 +24,51 @@ const crossOriginHeaders = {
   "Cross-Origin-Opener-Policy": "same-origin",
   "Cross-Origin-Embedder-Policy": "require-corp",
 };
+
+/** Public files the service worker precaches; their content versions the cache. */
+const SHELL_FILES = [
+  "index.html",
+  "manifest.webmanifest",
+  "icon.svg",
+  "README-web.html",
+];
+
+function replaceOnce(source: string, token: string, value: string): string {
+  if (source.split(token).length !== 2) {
+    throw new Error(`Expected one "${token}" in sw.js.`);
+  }
+  return source.replace(token, () => value);
+}
+
+/**
+ * Writes the build's asset list and a version derived from the build output
+ * into dist/sw.js, so each release gets a fresh shell cache and stale assets
+ * are removed.
+ */
+function stampServiceWorker(dist: string): void {
+  const assets = readdirSync(resolve(dist, "assets")).sort().map((name) =>
+    `/assets/${name}`
+  );
+  // The ONNX Runtime WASM file is large; cache it on first use, not on install.
+  const precache = [
+    ...assets.filter((path) => !path.endsWith(".wasm")),
+    "/README-web.html",
+  ];
+  const hash = createHash("sha256").update(assets.join("\n"));
+  for (const file of SHELL_FILES) hash.update(readFileSync(resolve(dist, file)));
+  const buildId = hash.digest("hex").slice(0, 12);
+
+  const swPath = resolve(dist, "sw.js");
+  let sw = readFileSync(swPath, "utf8");
+  sw = replaceOnce(sw, 'const BUILD_ID = "dev";', `const BUILD_ID = "${buildId}";`);
+  sw = replaceOnce(
+    sw,
+    "/* __OSPLIT_PRECACHE__ */ []",
+    JSON.stringify(precache),
+  );
+  sw = replaceOnce(sw, "/* __OSPLIT_ASSETS__ */ []", JSON.stringify(assets));
+  writeFileSync(swPath, sw);
+}
 
 function serveAndPackageModels(): Plugin {
   return {
@@ -70,6 +123,7 @@ function serveAndPackageModels(): Plugin {
       });
     },
     closeBundle() {
+      stampServiceWorker(resolve(webDirectory, "dist"));
       const output = resolve(webDirectory, "dist", "models");
       cpSync(modelRoot, output, { recursive: true });
       cpSync(ytDlpRoot, resolve(webDirectory, "dist", "yt-dlp"), {
