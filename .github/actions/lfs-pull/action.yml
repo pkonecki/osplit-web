@@ -1,0 +1,28 @@
+name: Pull Git LFS files with a cache
+description: >-
+  Restores Git LFS objects from the Actions cache, keyed by the LFS object IDs
+  of the checkout, and downloads only what is missing. Each model version is
+  then fetched from LFS once instead of on every job, which keeps CI within
+  the LFS bandwidth quota. Run after actions/checkout with lfs: false.
+
+runs:
+  using: composite
+  steps:
+    - name: Compute LFS cache key
+      id: key
+      shell: bash
+      run: |
+        set -euo pipefail
+        ids=$(git lfs ls-files --long | cut -d ' ' -f 1 | sort)
+        echo "key=lfs-$(printf '%s' "$ids" | sha256sum | cut -c 1-16)" >> "$GITHUB_OUTPUT"
+        echo "LFS files: $(printf '%s' "$ids" | grep -c . || true)"
+
+    - name: Restore LFS objects
+      uses: actions/cache@v4
+      with:
+        path: .git/lfs/objects
+        key: ${{ steps.key.outputs.key }}
+
+    - name: Check out LFS files
+      shell: bash
+      run: git lfs pull
