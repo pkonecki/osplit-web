@@ -1,5 +1,5 @@
 // The build replaces these placeholders (see vite.config.ts); the defaults keep
-// the dev server working.
+// the dev server working. Asset paths include the site's base path.
 const BUILD_ID = "dev";
 const PRECACHE = /* __OSPLIT_PRECACHE__ */ [];
 const ASSETS = /* __OSPLIT_ASSETS__ */ [];
@@ -9,7 +9,9 @@ const ASSETS = /* __OSPLIT_ASSETS__ */ [];
 // current build uses, so unchanged files survive app updates.
 const SHELL_CACHE = `osplit-shell-${BUILD_ID}`;
 const ASSET_CACHE = "osplit-assets";
-const SHELL = ["/", "/manifest.webmanifest", "/icon.svg", ...PRECACHE];
+// The app's base path, e.g. "/" or "/osplit-web/" on GitHub Pages.
+const BASE = new URL(self.registration.scope).pathname;
+const SHELL = [BASE, `${BASE}manifest.webmanifest`, `${BASE}icon.svg`, ...PRECACHE];
 const currentAssets = new Set(ASSETS);
 
 self.addEventListener("install", (event) => {
@@ -51,24 +53,27 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (
     request.method !== "GET" || url.origin !== self.location.origin ||
-    url.pathname.startsWith("/models/")
+    url.pathname.startsWith(`${BASE}models/`)
   ) return;
 
   if (request.mode === "navigate") {
+    // Store the app page under its base path, and other pages (such as the
+    // limitations page) under their own URL.
+    const isAppPage = url.pathname === BASE ||
+      url.pathname === `${BASE}index.html`;
+    const cacheKey = isAppPage ? BASE : url.pathname;
     event.respondWith(
       fetch(request).then((response) => {
         if (response.ok) {
           const copy = response.clone();
-          void caches.open(SHELL_CACHE).then((cache) => cache.put("/", copy));
+          void caches.open(SHELL_CACHE).then((cache) => cache.put(cacheKey, copy));
         }
         return response;
-      }).catch(() =>
-        caches.match("/").then((response) =>
-          response ??
-            new Response("OSplit is not available offline yet.", {
-              status: 503,
-            })
-        )
+      }).catch(async () =>
+        (await caches.match(cacheKey)) ?? (await caches.match(BASE)) ??
+          new Response("OSplit is not available offline yet.", {
+            status: 503,
+          })
       ),
     );
     return;
