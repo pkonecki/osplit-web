@@ -1,16 +1,10 @@
 import { createYtDlp } from "@project516/yt-dlp-wasm";
+import type { UrlRequest, UrlResponse } from "./messages";
 import { appUrl } from "./paths";
 import { getModel, putModel } from "./storage";
 
-type Request =
-  | { type: "download"; id: string; url: string }
-  | { type: "update"; id: string; installedVersion: string | null };
-
-type Response =
-  | { type: "progress"; id: string; progress: number; stage: string }
-  | { type: "downloaded"; id: string; name: string; blob: Blob }
-  | { type: "updated"; id: string; version: string }
-  | { type: "error"; id: string; message: string };
+type Request = UrlRequest;
+type Response = UrlResponse;
 
 const UNSUPPORTED_BROWSER = "UnsupportedBrowserError";
 

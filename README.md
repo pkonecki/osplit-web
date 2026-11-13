@@ -162,6 +162,23 @@ for public production use. Port 8080 is available for local smoke testing at
 `http://localhost:8080`. The build context/image includes roughly 295 MB of
 ONNX models, in addition to the ONNX Runtime WASM asset and yt-dlp wheel.
 
+## Models
+
+The separation models are the pretrained 5-stems models of
+[Spleeter](https://github.com/deezer/spleeter) by Deezer Research, converted to
+ONNX: one model per stem (vocals, piano, drums, bass, other), in full (FP32)
+and half (FP16) precision. Like the original models, they cover frequencies up
+to about 11 kHz, so separated stems contain nothing above that.
+
+Spleeter and its models are released under the MIT License by Deezer SA; see
+[`models/LICENSE-SPLEETER`](./models/LICENSE-SPLEETER), which the build also
+publishes next to the models. If you use OSplit in research, cite Spleeter:
+
+> Romain Hennequin, Anis Khlif, Felix Voituret, Manuel Moussallam.
+> "Spleeter: a fast and efficient music source separation tool with
+> pre-trained models." *Journal of Open Source Software*, 5(50), 2154, 2020.
+
 ## License
 
-The OSplit Web code is released under the [MIT License](./LICENSE).
+The OSplit Web code is released under the [MIT License](./LICENSE). The models
+are covered by the Spleeter license above.

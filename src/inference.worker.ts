@@ -20,18 +20,12 @@ import {
   modelLoadedProgress,
   separationProgress,
 } from "./progress";
+import type { InferenceRequest, InferenceResponse } from "./messages";
 import { loadModel } from "./models";
 import { type Quality, type Stem, STEMS } from "./types";
 
-type WorkerRequest =
-  | { type: "separate"; id: string; quality: Quality; samples: Float32Array }
-  | { type: "cancel"; id: string };
-
-type WorkerResponse =
-  | { type: "progress"; id: string; stage: string; progress: number }
-  | { type: "complete"; id: string; stems: Record<Stem, Blob> }
-  | { type: "error"; id: string; message: string }
-  | { type: "cancelled"; id: string };
+type WorkerRequest = InferenceRequest;
+type WorkerResponse = InferenceResponse;
 
 const cancelled = new Set<string>();
 const STEM_INDEX = new Map(STEMS.map((stem, index) => [stem, index]));
