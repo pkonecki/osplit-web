@@ -116,6 +116,35 @@ test("shows an error when the source audio is missing", async ({ page }) => {
   await expect(page.locator('[data-action="import"]')).toBeEnabled();
 });
 
+test("keeps typed text when the page re-renders", async ({ page }) => {
+  await openApp(page);
+  await createProjectWithClip(page, "Typing", clip);
+  const url = page.locator("#media-url");
+  await url.fill("https://example.com/song");
+  // Switching quality saves the project and re-renders the whole view.
+  await page.click('[data-action="quality"][data-quality="fp32"]');
+  await expect(page.locator('[data-quality="fp32"]')).toHaveClass(/selected/);
+  await expect(url).toHaveValue("https://example.com/song");
+
+  // A re-render while the field has focus keeps focus and the cursor
+  // position (the button is clicked by script so focus stays in the field).
+  await url.click();
+  await url.press("Home");
+  await page.locator('[data-action="quality"][data-quality="fp16"]').evaluate(
+    (button: HTMLButtonElement) => button.click(),
+  );
+  await expect(page.locator('[data-quality="fp16"]')).toHaveClass(/selected/);
+  await expect(url).toHaveValue("https://example.com/song");
+  await expect(url).toBeFocused();
+  expect(await url.evaluate((input: HTMLInputElement) => input.selectionStart))
+    .toBe(0);
+
+  // Text typed on one project does not leak into another project's page.
+  await page.click('[data-action="home"]');
+  await createProjectWithClip(page, "Other", clip);
+  await expect(page.locator("#media-url")).toHaveValue("");
+});
+
 test("separates a clip and mixes the stems", async ({ page }) => {
   await openApp(page);
   await createProjectWithClip(page, "E2E clip", clip);
