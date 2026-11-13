@@ -1,6 +1,7 @@
 import "./style.css";
 import { mixWavBlobs, resampleStereo } from "./audio-core";
 import { enableIsolationReload } from "./isolation";
+import { heldTaskLocks, taskLockName, withTaskLock } from "./task-lock";
 import { appUrl } from "./paths";
 import {
   completeSeparation,
@@ -67,8 +68,13 @@ async function start(): Promise<void> {
   registerServiceWorker();
   try {
     projects = await listProjects();
+    // A task still running in another tab holds its project's lock.
+    const held = await heldTaskLocks();
     for (const project of projects) {
-      if (project.status === "processing") {
+      if (
+        project.status === "processing" &&
+        !held?.has(taskLockName(project.id))
+      ) {
         await saveProject({
           ...project,
           status: "interrupted",
@@ -194,6 +200,8 @@ function projectCard(project: Project): string {
 function renderDetail(project: Project): string {
   const complete = project.completedStems.length > 0;
   const busy = working || project.status === "processing";
+  // Marked as processing but not by this tab: another tab holds its lock.
+  const elsewhere = !working && project.status === "processing";
   return `
     <header class="topbar">
       <button class="brand brand-button" data-action="home">
@@ -247,9 +255,11 @@ function renderDetail(project: Project): string {
       ? `<section class="process-card">
               <button class="button primary" data-action="${
         busy ? "cancel" : "separate"
-      }">${
+      }" ${elsewhere ? "disabled" : ""}>${
         urlWorker
           ? "Cancel download"
+          : elsewhere
+          ? "Processing in another tab…"
           : busy
           ? "Cancel processing"
           : complete
@@ -472,7 +482,9 @@ async function handleClick(event: Event): Promise<void> {
         break;
       case "separate":
         if (selectedProject) {
-          void separateProject(selectedProject).catch(showError);
+          const project = selectedProject;
+          void withTaskLock(project.id, () => separateProject(project))
+            .catch(showError);
         }
         break;
       case "cancel":
@@ -480,7 +492,10 @@ async function handleClick(event: Event): Promise<void> {
         else cancelSeparation();
         break;
       case "download-url":
-        if (selectedProject) await downloadFromUrl(selectedProject);
+        if (selectedProject) {
+          const project = selectedProject;
+          await withTaskLock(project.id, () => downloadFromUrl(project));
+        }
         break;
       case "yt-update":
         await checkYtDlpUpdate();
@@ -594,8 +609,13 @@ async function separateProject(project: Project): Promise<void> {
           reject(new Error(message.message));
         }
       };
-      worker.onerror = (error) =>
-        reject(new Error(error.message || "The inference worker failed."));
+      worker.onerror = (event) =>
+        reject(
+          workerCrash(
+            event,
+            "The separation stopped unexpectedly. This is usually the browser running out of memory: try Low quality or a shorter track.",
+          ),
+        );
       worker.postMessage({
         type: "separate",
         id,
@@ -772,8 +792,10 @@ async function downloadFromUrl(project: Project): Promise<void> {
             reject(new Error(message.message));
           }
         };
-        worker.onerror = (error) =>
-          reject(new Error(error.message || "URL download failed."));
+        worker.onerror = (event) =>
+          reject(
+            workerCrash(event, "The URL download stopped unexpectedly."),
+          );
         worker.postMessage({ type: "download", id, url });
       },
     );
@@ -831,8 +853,8 @@ async function checkYtDlpUpdate(): Promise<void> {
           reject(new Error(message.message));
         }
       };
-      worker.onerror = (error) =>
-        reject(new Error(error.message || "yt-dlp update failed."));
+      worker.onerror = (event) =>
+        reject(workerCrash(event, "The yt-dlp update stopped unexpectedly."));
       worker.postMessage({
         type: "update",
         id,
@@ -975,6 +997,16 @@ async function handleChange(event: Event): Promise<void> {
   if (target.dataset.action === "volume" && selectedProject) {
     selectedProject = await saveProject(selectedProject);
   }
+}
+
+/**
+ * A worker's uncaught error (often the browser killing it for memory) reaches
+ * the page as a bare ErrorEvent whose message is useless to show, such as
+ * "Uncaught [object ErrorEvent]". Log the details and show a plain message.
+ */
+function workerCrash(event: ErrorEvent, message: string): Error {
+  console.error(message, event.message, event.error ?? event);
+  return new Error(message);
 }
 
 function describeError(error: unknown): string {

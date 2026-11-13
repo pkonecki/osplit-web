@@ -55,8 +55,45 @@ jobs:
               exit 1
             fi
           done
+          test -s dist/models/models.json
           ls dist/assets/*.wasm >/dev/null
           du -sh dist
+
+  e2e:
+    name: Browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/lfs-pull
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.3
+          cache: true
+
+      - name: Install dependencies
+        run: deno install --frozen
+
+      # Two builds: at the root (served with the isolation headers, like
+      # nginx) and under /osplit-web/ (served without them, like GitHub Pages).
+      - name: Build both variants
+        run: |
+          deno task build
+          BASE_PATH=/osplit-web/ deno task build --outDir dist-pages
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('deno.lock') }}
+
+      - name: Install Chromium
+        run: npx --no-install playwright install --with-deps chromium
+
+      - name: Run browser tests
+        run: npx --no-install playwright test
 
   docker:
     name: Docker image and headers
@@ -120,7 +157,7 @@ jobs:
   pages:
     name: Build for GitHub Pages
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [verify, docker]
+    needs: [verify, docker, e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

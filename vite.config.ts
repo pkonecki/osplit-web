@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { createHash } from "node:crypto";
 import {
   cpSync,
@@ -87,6 +88,26 @@ function isLfsPointer(file: string): boolean {
   return readFileSync(file, "utf8").startsWith(LFS_POINTER_PREFIX);
 }
 
+/**
+ * Size and SHA-256 of every model, keyed by path below models/. The app checks
+ * downloads against it and uses the checksum in its cache key (src/models.ts).
+ */
+function modelManifest(): Record<string, { size: number; sha256: string }> {
+  const manifest: Record<string, { size: number; sha256: string }> = {};
+  const names = readdirSync(modelRoot, { recursive: true, encoding: "utf8" })
+    .filter((name) => name.endsWith(".onnx"))
+    .map((name) => name.split(sep).join("/"))
+    .sort();
+  for (const name of names) {
+    const bytes = readFileSync(resolve(modelRoot, name));
+    manifest[name] = {
+      size: bytes.byteLength,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    };
+  }
+  return manifest;
+}
+
 /** Fails early when the models were checked out without Git LFS. */
 function assertModelsPresent(): void {
   const pointers = readdirSync(modelRoot, { recursive: true, encoding: "utf8" })
@@ -105,8 +126,13 @@ function serveAndPackageModels(): Plugin {
   // Packaging runs only after a successful build, so an earlier error (such as
   // missing models) is reported instead of a follow-up packaging failure.
   let buildSucceeded = false;
+  let outDir = resolve(webDirectory, "dist");
+  let devManifest: string | undefined;
   return {
     name: "osplit-model-assets",
+    configResolved(config) {
+      outDir = resolve(config.root, config.build.outDir);
+    },
     buildStart() {
       buildSucceeded = false;
       assertModelsPresent();
@@ -145,6 +171,13 @@ function serveAndPackageModels(): Plugin {
         }
         if (!url.startsWith("/models/")) return next();
         const requested = decodeURIComponent(url.slice("/models/".length));
+        if (requested === "models.json") {
+          devManifest ??= JSON.stringify(modelManifest());
+          response.setHeader("Content-Type", "application/json");
+          response.setHeader("Cache-Control", "no-cache");
+          response.end(devManifest);
+          return;
+        }
         if (!/^(fp16|fp32)\/[a-z]+(?:\.fp16)?\.onnx$/.test(requested)) {
           response.statusCode = 404;
           response.end("Model not found");
@@ -167,12 +200,14 @@ function serveAndPackageModels(): Plugin {
     },
     closeBundle() {
       if (!buildSucceeded) return;
-      stampServiceWorker(resolve(webDirectory, "dist"));
-      const output = resolve(webDirectory, "dist", "models");
+      stampServiceWorker(outDir);
+      const output = resolve(outDir, "models");
       cpSync(modelRoot, output, { recursive: true });
-      cpSync(ytDlpRoot, resolve(webDirectory, "dist", "yt-dlp"), {
-        recursive: true,
-      });
+      writeFileSync(
+        resolve(output, "models.json"),
+        JSON.stringify(modelManifest(), null, 2),
+      );
+      cpSync(ytDlpRoot, resolve(outDir, "yt-dlp"), { recursive: true });
     },
   };
 }
@@ -184,4 +219,6 @@ export default defineConfig({
   server: { headers: crossOriginHeaders },
   preview: { headers: crossOriginHeaders },
   worker: { format: "es" },
+  // The browser tests in e2e/ run with Playwright, not Vitest.
+  test: { include: ["src/**/*.test.ts"] },
 });
