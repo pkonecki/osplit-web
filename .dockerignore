@@ -7,3 +7,6 @@ coverage
 dist
 node_modules
 *.local
+dist-pages
+test-results
+playwright-report

@@ -1,7 +1,9 @@
 {
   "version": "5",
   "specifiers": {
+    "npm:@playwright/test@1.63.0": "1.63.0",
     "npm:@project516/yt-dlp-wasm@0.6": "0.6.0",
+    "npm:fake-indexeddb@^6.2.8": "6.2.8",
     "npm:onnxruntime-web@^1.31.1": "1.31.1",
     "npm:typescript@~7.0.2": "7.0.2",
     "npm:vite@^8.3.5": "8.3.5",
@@ -23,6 +25,13 @@
     },
     "@oxc-project/types@0.156.0": {
       "integrity": "sha512-1Duyg48TdJNdyhEB8Xn1L36bT9Pv6GUtlKjHxOys8xkaF/rQq3XJE+bAurSK/AgIz5mGFsb77cn9Pb20+WCScw=="
+    },
+    "@playwright/test@1.63.0": {
+      "integrity": "sha512-oxMK4vllB9RK5NQ2l1pq1IfOf2AvnEuj/vYGDj0H2nMtmtZpKtCwt/l00GEO6xjGfpBNAvjovvYdCm50dRQkpQ==",
+      "dependencies": [
+        "playwright"
+      ],
+      "bin": true
     },
     "@project516/ffmpeg-wasm-core@0.17.0": {
       "integrity": "sha512-ibCEsgC497gTI70XBkKp73aW7/955EUPjUbOpGB86caJ5ze0MLq5bmPiIIiZXtey6o+8hVHDis+xn4VkIxfQjA=="
@@ -302,6 +311,9 @@
     "expect-type@1.4.0": {
       "integrity": "sha512-KfYbmpRm0VbLjEvVa9yGwCi9GI34xvi7A/HXYWQO65CSD2u3MczUJSuwXKFIxlGsgBQizV9q5J9NHj4VG0n+pA=="
     },
+    "fake-indexeddb@6.2.8": {
+      "integrity": "sha512-mpVW/HLUqwKXJ6F/s0hMgdK1eQfM4ncTHDioNGHWL0WKV3VcZCoZq1NKgboBbAge07aRCO7L48yziKssL59XEQ=="
+    },
     "fdir@6.5.0_picomatch@4.0.7": {
       "integrity": "sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg==",
       "dependencies": [
@@ -434,6 +446,17 @@
     },
     "platform@1.3.6": {
       "integrity": "sha512-fnWVljUchTro6RiCFvCXBbNhJc2NijN7oIQxbwsyL0buWJPG85v81ehlHI9fXrJsMNgTofEoWIQeClKpgxFLrg=="
+    },
+    "playwright-core@1.63.0": {
+      "integrity": "sha512-rYCsBF/M5HjUch52bbtVONEFjv6Xu8sm8h72dNlR5bzIE1fvC/bxgspzkjSfU+MweEMmPM8KJebG6nnyxo5mCg==",
+      "bin": true
+    },
+    "playwright@1.63.0": {
+      "integrity": "sha512-+7ziBLidS4NaNCdt57SUDT+wYmmd5fmiQejUic/kb+YsYSCPyOOE9sebzMjNmQrsnNpDJqd4WHvV/8lfKfUDUg==",
+      "dependencies": [
+        "playwright-core"
+      ],
+      "bin": true
     },
     "postcss@8.5.32": {
       "integrity": "sha512-LJlKCCAUFKOuZxipUdYw1NzIITEsPcgyOG9LkvRJvuKj/bRzbuRY0ARXvL0pWGpsZvn8jku+LMep2eU0seHp8g==",
@@ -585,7 +608,9 @@
   "workspace": {
     "packageJson": {
       "dependencies": [
+        "npm:@playwright/test@1.63.0",
         "npm:@project516/yt-dlp-wasm@0.6",
+        "npm:fake-indexeddb@^6.2.8",
         "npm:onnxruntime-web@^1.31.1",
         "npm:typescript@~7.0.2",
         "npm:vite@^8.3.5",

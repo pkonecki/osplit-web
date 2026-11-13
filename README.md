@@ -33,8 +33,27 @@ deno task build
 ```
 
 The build copies both model qualities (about 295 MB total) from this repository's
-`models/` folder into `dist/models`. Models are downloaded and cached
-individually in the browser when first used.
+`models/` folder into `dist/models`, with `models.json` listing each model's
+size and SHA-256. Models are downloaded and cached individually in the browser
+when first used; downloads are checked against `models.json`, and a model whose
+checksum changes is downloaded again.
+
+## Testing
+
+`deno task test` runs the unit tests (Vitest). The browser tests (Playwright,
+headless Chromium) run against two production builds: one at the root served
+with the cross-origin isolation headers, like nginx, and one under
+`/osplit-web/` served without them, like GitHub Pages:
+
+```bash
+deno task build
+BASE_PATH=/osplit-web/ deno task build --outDir dist-pages
+npx playwright install chromium
+npx playwright test
+```
+
+They separate a short generated clip with the real models, so the first run
+takes a minute or two. CI runs both suites on every pull request.
 The PWA can be deployed independently as a static site; production deployment
 requires HTTPS and the cross-origin isolation headers documented below.
 
@@ -142,3 +161,7 @@ The container serves HTTP. Put it behind a TLS reverse proxy or load balancer
 for public production use. Port 8080 is available for local smoke testing at
 `http://localhost:8080`. The build context/image includes roughly 295 MB of
 ONNX models, in addition to the ONNX Runtime WASM asset and yt-dlp wheel.
+
+## License
+
+The OSplit Web code is released under the [MIT License](./LICENSE).

@@ -4,23 +4,23 @@ import ortWasmUrl from "onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm?url";
 import {
   CHANNELS,
   encodeWav,
-  fftInPlace,
-  FRAME_LENGTH,
   FREQUENCY_BINS,
-  HOP_LENGTH,
-  makeHannWindow,
-  makeSynthesisWindow,
-  OVERLAP_BUFFER_SIZE,
   SAMPLES_PER_SEGMENT,
   SEGMENT_FRAMES,
 } from "./audio-core";
+import {
+  logitsToMasks,
+  OverlapAddSynthesizer,
+  planStft,
+  SegmentAnalyzer,
+  segmentFrames,
+} from "./stft";
 import {
   modelDownloadProgress,
   modelLoadedProgress,
   separationProgress,
 } from "./progress";
-import { appUrl } from "./paths";
-import { getModel, putModel } from "./storage";
+import { loadModel } from "./models";
 import { type Quality, type Stem, STEMS } from "./types";
 
 type WorkerRequest =
@@ -87,6 +87,7 @@ async function separate(
       );
       await releaseSessions(sessions);
       provider = "wasm";
+      report(id, "Retrying on CPU…", 0);
       sessions = await loadSessions(quality, id, provider);
     }
 
@@ -98,6 +99,7 @@ async function separate(
       console.warn("WebGPU inference failed; retrying with WASM.", error);
       await releaseSessions(sessions);
       provider = "wasm";
+      report(id, "Retrying on CPU…", 0);
       sessions = await loadSessions(quality, id, provider);
       outputs = await runSeparation(request.samples, sessions, id, quality);
     }
@@ -138,7 +140,11 @@ async function loadSessions(
     for (let index = 0; index < STEMS.length; index++) {
       checkCancelled(id);
       const stem = STEMS[index];
-      const bytes = await modelBytes(quality, stem, id, index);
+      const bytes = await loadModel(quality, stem, {
+        onProgress: (fraction) =>
+          reportDownload(id, stem, modelDownloadProgress(index, STEMS.length, fraction)),
+        checkCancelled: () => checkCancelled(id),
+      });
       sessions[stem] = await createSession(bytes, provider);
       report(id, "Loading models", modelLoadedProgress(index, STEMS.length));
     }
@@ -147,67 +153,6 @@ async function loadSessions(
     await releaseSessions(sessions);
     throw error;
   }
-}
-
-async function modelBytes(
-  quality: Quality,
-  stem: Stem,
-  id: string,
-  modelIndex: number,
-): Promise<ArrayBuffer> {
-  const name = quality === "fp16" ? `${stem}.fp16.onnx` : `${stem}.onnx`;
-  const key = `${quality}/${name}`;
-  const cached = await getModel(key);
-  if (cached) return cached.blob.arrayBuffer();
-  checkCancelled(id);
-
-  const response = await fetch(appUrl(`models/${key}`));
-  if (!response.ok) {
-    throw new Error(`Could not download the ${stem} ${quality} model.`);
-  }
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error(`Could not read the ${stem} model download.`);
-  const chunks: Uint8Array[] = [];
-  let downloaded = 0;
-  let lastReported = -1;
-  const total = Number(response.headers.get("content-length")) || 0;
-  while (true) {
-    checkCancelled(id);
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) {
-      chunks.push(value);
-      downloaded += value.length;
-      const progress = total > 0
-        ? modelDownloadProgress(modelIndex, STEMS.length, downloaded / total)
-        : modelDownloadProgress(modelIndex, STEMS.length, 0);
-      if (progress !== lastReported) {
-        lastReported = progress;
-        report(id, `Downloading ${stem} model`, progress);
-      }
-    }
-  }
-  const modelData = new Uint8Array(downloaded);
-  let chunkOffset = 0;
-  for (const chunk of chunks) {
-    modelData.set(chunk, chunkOffset);
-    chunkOffset += chunk.length;
-  }
-  const blob = new Blob([modelData.buffer], {
-    type: "application/octet-stream",
-  });
-  if (!blob.size) throw new Error(`The downloaded ${stem} model is empty.`);
-  try {
-    await putModel({ key, blob, storedAt: Date.now() });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "QuotaExceededError") {
-      throw new Error(
-        "Not enough browser storage for the models. Delete local projects or free storage.",
-      );
-    }
-    throw error;
-  }
-  return blob.arrayBuffer();
 }
 
 async function createSession(
@@ -247,70 +192,23 @@ async function runSeparation(
     throw new Error("The decoded source has no valid stereo samples.");
   }
   const frameCount = interleavedSamples.length / CHANNELS;
-  const analysisFrameCount = Math.ceil(
-    (frameCount + FRAME_LENGTH) / HOP_LENGTH,
-  );
-  const segmentCount = Math.ceil(analysisFrameCount / SEGMENT_FRAMES);
-  const paddedFrameLimit = frameCount + FRAME_LENGTH;
-
-  const outputs = Object.fromEntries(
-    STEMS.map((stem) => [stem, new Float32Array(frameCount * CHANNELS)]),
-  ) as Record<Stem, Float32Array>;
-  const overlap = Array.from(
-    { length: STEMS.length * CHANNELS },
-    () => new Float32Array(OVERLAP_BUFFER_SIZE),
-  );
-  const window = makeHannWindow();
-  const synthesisWindow = makeSynthesisWindow();
-  const real = new Float32Array(FRAME_LENGTH);
-  const imaginary = new Float32Array(FRAME_LENGTH);
-  const spectrogram = new Float32Array(CHANNELS * SAMPLES_PER_SEGMENT);
-  const spectra = new Float32Array(CHANNELS * SAMPLES_PER_SEGMENT * 2);
+  const plan = planStft(frameCount);
+  const outputs = STEMS.map(() => new Float32Array(frameCount * CHANNELS));
+  const analyzer = new SegmentAnalyzer(interleavedSamples, plan);
+  const synthesizer = new OverlapAddSynthesizer(plan, outputs);
   const logits = new Float32Array(
     STEMS.length * CHANNELS * SAMPLES_PER_SEGMENT,
   );
-  let nextSampleToWrite = 0;
 
-  for (let chunk = 0; chunk < segmentCount; chunk++) {
+  for (let segment = 0; segment < plan.segmentCount; segment++) {
     checkCancelled(id);
-    const firstFrame = chunk * SEGMENT_FRAMES;
-    const validFrames = Math.min(
-      SEGMENT_FRAMES,
-      analysisFrameCount - firstFrame,
-    );
-    spectrogram.fill(0);
-    spectra.fill(0);
-
-    for (let channel = 0; channel < CHANNELS; channel++) {
-      for (let time = 0; time < validFrames; time++) {
-        const globalFrame = firstFrame + time;
-        const sourceStart = globalFrame * HOP_LENGTH - FRAME_LENGTH;
-        for (let i = 0; i < FRAME_LENGTH; i++) {
-          const sourceIndex = sourceStart + i;
-          real[i] = sourceIndex >= 0 && sourceIndex < frameCount
-            ? interleavedSamples[sourceIndex * CHANNELS + channel] * window[i]
-            : 0;
-          imaginary[i] = 0;
-        }
-        fftInPlace(real, imaginary, false);
-        for (let frequency = 0; frequency < FREQUENCY_BINS; frequency++) {
-          const feature = (channel * SEGMENT_FRAMES + time) * FREQUENCY_BINS +
-            frequency;
-          const complex = feature * 2;
-          const re = real[frequency];
-          const im = imaginary[frequency];
-          spectrogram[feature] = Math.hypot(re, im);
-          spectra[complex] = re;
-          spectra[complex + 1] = im;
-        }
-      }
-    }
+    analyzer.analyze(segment);
 
     for (const stem of STEMS) {
       checkCancelled(id);
       const session = sessions[stem];
       if (!session) throw new Error(`The ${stem} model is not loaded.`);
-      const tensor = new ort.Tensor("float32", spectrogram, [
+      const tensor = new ort.Tensor("float32", analyzer.spectrogram, [
         CHANNELS,
         1,
         SEGMENT_FRAMES,
@@ -322,93 +220,39 @@ async function runSeparation(
         throw new Error(`Unexpected output tensor for the ${stem} model.`);
       }
       const stemIndex = STEM_INDEX.get(stem)!;
-      const destinationOffset = stemIndex * CHANNELS * SAMPLES_PER_SEGMENT;
       logits.set(
         output.data.subarray(0, CHANNELS * SAMPLES_PER_SEGMENT),
-        destinationOffset,
+        stemIndex * CHANNELS * SAMPLES_PER_SEGMENT,
       );
       tensor.dispose();
       for (const value of Object.values(result)) value.dispose();
     }
 
-    for (let time = 0; time < validFrames; time++) {
-      const globalFrame = firstFrame + time;
-      const startSample = globalFrame * HOP_LENGTH;
-      for (let channel = 0; channel < CHANNELS; channel++) {
-        const featureOffset = (channel * SEGMENT_FRAMES + time) *
-          FREQUENCY_BINS;
-        for (let frequency = 0; frequency < FREQUENCY_BINS; frequency++) {
-          const feature = featureOffset + frequency;
-          let maxLogit = -Infinity;
-          for (let source = 0; source < STEMS.length; source++) {
-            const index = source * CHANNELS * SAMPLES_PER_SEGMENT + feature;
-            const scaled = logits[index] * 2;
-            logits[index] = scaled;
-            maxLogit = Math.max(maxLogit, scaled);
-          }
-          let denominator = 0;
-          for (let source = 0; source < STEMS.length; source++) {
-            const index = source * CHANNELS * SAMPLES_PER_SEGMENT + feature;
-            logits[index] = Math.exp(logits[index] - maxLogit);
-            denominator += logits[index];
-          }
-          for (let source = 0; source < STEMS.length; source++) {
-            const index = source * CHANNELS * SAMPLES_PER_SEGMENT + feature;
-            logits[index] /= denominator;
-          }
-        }
-
-        for (let source = 0; source < STEMS.length; source++) {
-          real.fill(0);
-          imaginary.fill(0);
-          for (let frequency = 0; frequency < FREQUENCY_BINS; frequency++) {
-            const feature = featureOffset + frequency;
-            const index = source * CHANNELS * SAMPLES_PER_SEGMENT + feature;
-            const complex = feature * 2;
-            const mask = logits[index];
-            real[frequency] = spectra[complex] * mask;
-            imaginary[frequency] = spectra[complex + 1] * mask;
-            if (frequency > 0) {
-              real[FRAME_LENGTH - frequency] = real[frequency];
-              imaginary[FRAME_LENGTH - frequency] = -imaginary[frequency];
-            }
-          }
-          fftInPlace(real, imaginary, true);
-          const buffer = overlap[source * CHANNELS + channel];
-          for (let i = 0; i < FRAME_LENGTH; i++) {
-            const ring = (startSample + i) % OVERLAP_BUFFER_SIZE;
-            buffer[ring] += real[i] * synthesisWindow[i];
-          }
-        }
-      }
-
-      const safeEnd = Math.min(startSample + HOP_LENGTH, paddedFrameLimit);
-      const writeStart = Math.max(nextSampleToWrite, FRAME_LENGTH);
-      for (let sample = writeStart; sample < safeEnd; sample++) {
-        const outputFrame = sample - FRAME_LENGTH;
-        const ring = sample % OVERLAP_BUFFER_SIZE;
-        for (let source = 0; source < STEMS.length; source++) {
-          const out = outputs[STEMS[source]];
-          out[outputFrame * CHANNELS] = overlap[source * CHANNELS][ring];
-          out[outputFrame * CHANNELS + 1] =
-            overlap[source * CHANNELS + 1][ring];
-        }
-        for (const buffer of overlap) buffer[ring] = 0;
-      }
-      nextSampleToWrite = startSample + HOP_LENGTH;
-    }
+    logitsToMasks(logits, STEMS.length, segmentFrames(plan, segment));
+    synthesizer.synthesize(segment, analyzer.spectra, logits);
     report(
       id,
       `Separating · ${quality.toUpperCase()}`,
-      separationProgress(chunk + 1, segmentCount),
+      separationProgress(segment + 1, plan.segmentCount),
     );
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }
 
   checkCancelled(id);
   return Object.fromEntries(
-    STEMS.map((stem) => [stem, encodeWav(outputs[stem], frameCount)]),
+    STEMS.map((stem, index) => [stem, encodeWav(outputs[index], frameCount)]),
   ) as Record<Stem, Blob>;
+}
+
+let lastDownloadReport = "";
+
+/** Reports download progress only when the shown value changes. */
+function reportDownload(id: string, stem: Stem, progress: number): void {
+  const stage = `Downloading ${stem} model`;
+  const signature = `${id}:${stage}:${progress}`;
+  if (signature === lastDownloadReport) return;
+  lastDownloadReport = signature;
+  report(id, stage, progress);
 }
 
 function report(id: string, stage: string, progress: number): void {
