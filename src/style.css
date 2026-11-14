@@ -154,6 +154,14 @@ input[type="range"] { width: 100%; accent-color: var(--lime); cursor: pointer; }
 .waveform canvas { display: block; width: 100%; height: 100%; }
 .waveform .playhead { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; margin-left: -1px; background: #f0f1e9; pointer-events: none; }
 .stem-control:focus-visible { outline: 2px solid var(--lime); outline-offset: 2px; border-radius: 10px; }
+.check-row { display: flex; align-items: center; gap: .5rem; font-size: .8rem; }
+.check-row input { width: auto; accent-color: var(--lime); }
+.confirm-dialog { max-width: min(26rem, 100% - 2rem); padding: 1.2rem; border: 1px solid var(--line); border-radius: 14px; color: inherit; background: #1b2119; }
+.confirm-dialog::backdrop { background: rgba(0, 0, 0, .6); }
+.confirm-dialog p { margin: 0 0 1rem; line-height: 1.5; }
+.confirm-dialog .dialog-actions { display: flex; justify-content: flex-end; gap: .5rem; }
+.button.danger { color: #ffd3c9; background: #5a2a22; border-color: #8a3a2e; }
+#app.drop-target { outline: 2px dashed var(--lime); outline-offset: -8px; }
 .notice { margin: 1.4rem 0 0; padding: .75rem .85rem; border-left: 2px solid #627d48; background: rgba(37, 45, 35, .45); }
 .message { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .75rem .9rem; border: 1px solid rgba(255, 140, 117, .4); border-radius: 10px; color: #ffd3c9; background: #39211d; font-size: .85rem; }
 .message button { border: 0; color: inherit; background: transparent; font-size: 1.3rem; cursor: pointer; }

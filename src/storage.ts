@@ -235,6 +235,7 @@ export async function replaceSource(
       updated = {
         ...current,
         sourceName: name,
+        sourceRemoved: false,
         status: "ready",
         completedStems: [],
         errorMessage: null,
@@ -309,7 +310,10 @@ export async function completeSeparation(
 ): Promise<Project> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction([PROJECTS, STEM_BLOBS, PEAKS], "readwrite");
+    const tx = db.transaction(
+      [PROJECTS, SOURCES, STEM_BLOBS, PEAKS],
+      "readwrite",
+    );
     const projects = tx.objectStore(PROJECTS);
     const request = projects.get(projectId);
     let updated: Project | undefined;
@@ -333,8 +337,11 @@ export async function completeSeparation(
           );
         }
       });
+      const removeSource = current.deleteSourceAfterSeparation === true;
+      if (removeSource) tx.objectStore(SOURCES).delete(projectId);
       updated = {
         ...current,
+        sourceRemoved: removeSource || current.sourceRemoved,
         status: "ready",
         completedStems: [...STEMS],
         errorMessage: null,

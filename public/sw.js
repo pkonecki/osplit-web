@@ -9,6 +9,8 @@ const ASSETS = /* __OSPLIT_ASSETS__ */ [];
 // current build uses, so unchanged files survive app updates.
 const SHELL_CACHE = `osplit-shell-${BUILD_ID}`;
 const ASSET_CACHE = "osplit-assets";
+// Holds a file shared to the installed app until the page picks it up.
+const INBOX_CACHE = "osplit-inbox";
 // The app's base path, e.g. "/" or "/osplit-web/" on GitHub Pages.
 const BASE = new URL(self.registration.scope).pathname;
 const SHELL = [BASE, `${BASE}manifest.webmanifest`, `${BASE}icon.svg`, ...PRECACHE];
@@ -57,7 +59,7 @@ async function deleteOldCaches() {
   const keys = await caches.keys();
   await Promise.all(
     keys
-      .filter((key) => key !== SHELL_CACHE && key !== ASSET_CACHE)
+      .filter((key) => ![SHELL_CACHE, ASSET_CACHE, INBOX_CACHE].includes(key))
       .map((key) => caches.delete(key)),
   );
 }
@@ -72,9 +74,39 @@ async function pruneAssetCache() {
   );
 }
 
+// "Share to OSplit" (manifest share_target): keep the shared file, then open
+// the app, which creates a project from it (src/tasks/import.ts).
+async function receiveShare(request) {
+  try {
+    const file = (await request.formData()).get("audio");
+    if (file && typeof file !== "string") {
+      const cache = await caches.open(INBOX_CACHE);
+      await cache.put(
+        `${BASE}inbox`,
+        new Response(file, {
+          headers: {
+            "Content-Type": file.type || "application/octet-stream",
+            "X-File-Name": encodeURIComponent(file.name || "shared-audio"),
+          },
+        }),
+      );
+    }
+  } catch (error) {
+    console.warn("The shared file could not be received.", error);
+  }
+  return Response.redirect(`${BASE}?shared=1`, 303);
+}
+
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);
+  if (
+    request.method === "POST" && url.origin === self.location.origin &&
+    url.pathname === `${BASE}share`
+  ) {
+    event.respondWith(receiveShare(request));
+    return;
+  }
   if (
     request.method !== "GET" || url.origin !== self.location.origin ||
     url.pathname.startsWith(`${BASE}models/`)

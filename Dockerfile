@@ -5,11 +5,12 @@ WORKDIR /app/web
 COPY . ./
 
 RUN deno install --frozen \
-    && deno task build
+    && PRECOMPRESS=1 deno task build
 
 FROM nginxinc/nginx-unprivileged:alpine
 
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+COPY deploy/security-headers.conf /etc/nginx/snippets/security-headers.conf
 COPY --from=build /app/web/dist/ /usr/share/nginx/html/
 
 EXPOSE 8080

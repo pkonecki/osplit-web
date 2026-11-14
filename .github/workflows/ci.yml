@@ -102,7 +102,7 @@ jobs:
   docker:
     name: Docker image and headers
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
 
@@ -130,7 +130,7 @@ jobs:
           docker logs osplit
           exit 1
 
-      - name: Check cross-origin isolation and cache headers
+      - name: Check headers, MIME types and compression
         run: |
           set -euo pipefail
           expect_header() {
@@ -153,6 +153,50 @@ jobs:
           expect_header /sw.js "Cache-Control: no-cache"
           expect_header "$asset" "Cache-Control: public, max-age=31536000, immutable"
           expect_header /models/fp16/bass.fp16.onnx "Cache-Control: public, max-age=86400"
+          for path in / /sw.js "$asset"; do
+            expect_header "$path" "X-Content-Type-Options: nosniff"
+            expect_header "$path" "Referrer-Policy: no-referrer"
+            expect_header "$path" "Content-Security-Policy: default-src 'self'"
+          done
+          # With nosniff, browsers trust these types; a module script must be
+          # served as JavaScript.
+          # The service worker's asset list names the ONNX Runtime files.
+          ort_module=$(curl -fsS http://127.0.0.1:8080/sw.js | grep -o '/assets/ort-wasm[^"]*\.mjs' | head -n 1)
+          ort_wasm=$(curl -fsS http://127.0.0.1:8080/sw.js | grep -o '/assets/ort-wasm[^"]*\.wasm' | head -n 1)
+          test -n "$ort_module" && test -n "$ort_wasm"
+          expect_header "$ort_module" "Content-Type: text/javascript"
+          expect_header /manifest.webmanifest "Content-Type: application/manifest+json"
+          # The WebAssembly is sent precompressed.
+          gzip_headers=$(curl -fsS -H "Accept-Encoding: gzip" -D - -o /dev/null "http://127.0.0.1:8080$ort_wasm")
+          if ! grep -qi "^Content-Encoding: gzip" <<<"$gzip_headers"; then
+            echo "::error::$ort_wasm is not sent gzip-compressed"
+            echo "$gzip_headers"
+            exit 1
+          fi
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.3
+          cache: true
+
+      - name: Install dependencies
+        run: deno install --frozen
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('deno.lock') }}
+
+      - name: Install Chromium
+        run: npx --no-install playwright install --with-deps chromium
+
+      # Separation, playback and the URL downloader under the image's
+      # Content-Security-Policy, failing on any violation (e2e/csp.spec.ts).
+      - name: Run browser tests against the image
+        env:
+          DOCKER_URL: http://localhost:8080/
+        run: npx --no-install playwright test
 
       - name: Container logs
         if: always()

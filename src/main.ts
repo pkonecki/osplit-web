@@ -38,9 +38,17 @@ import {
   terminateUrlWorker,
   urlTaskActive,
 } from "./tasks/url-download";
+import {
+  importAsNewProject,
+  installLaunchQueue,
+  isAudioFile,
+  NOT_AUDIO_MESSAGE,
+  takeSharedFile,
+} from "./tasks/import";
 import { installWakeLock } from "./tasks/wake-lock";
 import { newProject, type Project, type Quality, type Stem } from "./types";
 import { renderDetail } from "./view/detail";
+import { confirmDialog } from "./view/dialog";
 import { captureForm, restoreForm } from "./view/form-state";
 import { describeError, escapeHtml } from "./view/format";
 import { updatePlayerDisplay } from "./view/mixer";
@@ -92,8 +100,30 @@ async function start(): Promise<void> {
       state.projects.find((project) => project.id === lastId) ?? null;
     await render();
     void requestPersistentStorage();
+    installLaunchQueue((file) => void importFile(file));
+    const shared = await takeSharedFile();
+    if (shared) await importFile(shared);
   } catch (error) {
     showFatal(error);
+  }
+}
+
+/** Imports a file shared, opened with or dropped on the app. */
+async function importFile(file: File): Promise<void> {
+  try {
+    if (state.working) {
+      throw new Error(
+        "Wait for the current task or cancel it before importing another file.",
+      );
+    }
+    if (state.selectedProject && renderedView?.startsWith("project:")) {
+      if (!isAudioFile(file)) throw new Error(NOT_AUDIO_MESSAGE);
+      await importSource(file);
+    } else {
+      await importAsNewProject(file);
+    }
+  } catch (error) {
+    showError(error);
   }
 }
 
@@ -176,7 +206,10 @@ async function handleClick(event: Event): Promise<void> {
       case "delete":
         if (
           id &&
-          confirm("Delete this project and all its source audio and stems?")
+          await confirmDialog(
+            "Delete this project and all its source audio and stems?",
+            "Delete project",
+          )
         ) {
           await deleteProject(id);
           if (state.selectedProject?.id === id) state.selectedProject = null;
@@ -328,17 +361,23 @@ async function handleFileChange(event: Event): Promise<void> {
   }
   state.fileDialogTarget = "none";
   try {
-    state.selectedProject = await replaceSource(
-      state.selectedProject,
-      file,
-      file.name,
-    );
-    state.screenMessage = "";
-    await render();
+    await importSource(file);
   } catch (error) {
     state.screenMessage = describeError(error);
     await render();
   }
+}
+
+/** Makes a file the open project's source audio (clearing its stems). */
+async function importSource(file: File): Promise<void> {
+  if (!state.selectedProject) return;
+  state.selectedProject = await replaceSource(
+    state.selectedProject,
+    file,
+    file.name,
+  );
+  state.screenMessage = "";
+  await render();
 }
 
 async function toggleMute(project: Project, stem: Stem): Promise<void> {
@@ -382,6 +421,13 @@ async function handleChange(event: Event): Promise<void> {
     setExportFormat(target.value === "wav" ? "wav" : "flac");
     return;
   }
+  if (target.dataset.action === "delete-source-option" && state.selectedProject) {
+    state.selectedProject = await saveProject({
+      ...state.selectedProject,
+      deleteSourceAfterSeparation: target.checked,
+    });
+    return;
+  }
   if (target.type === "range" && target.id === "seek-bar") {
     seekAll(Number(target.value));
   }
@@ -420,6 +466,30 @@ root.addEventListener("change", (event) => {
   if ((event.target as HTMLElement).id === "audio-file") {
     void handleFileChange(event);
   }
+});
+
+// Drag and drop: onto the project list it creates a project, onto a project
+// page it replaces that project's source audio.
+function draggingFiles(event: DragEvent): boolean {
+  return event.dataTransfer?.types.includes("Files") ?? false;
+}
+root.addEventListener("dragover", (event) => {
+  if (!draggingFiles(event)) return;
+  event.preventDefault();
+  event.dataTransfer!.dropEffect = "copy";
+  root.classList.add("drop-target");
+});
+root.addEventListener("dragleave", (event) => {
+  if (!root.contains(event.relatedTarget as Node | null)) {
+    root.classList.remove("drop-target");
+  }
+});
+root.addEventListener("drop", (event) => {
+  root.classList.remove("drop-target");
+  const file = event.dataTransfer?.files[0];
+  if (!file) return;
+  event.preventDefault();
+  void importFile(file);
 });
 
 window.addEventListener("pagehide", () => {

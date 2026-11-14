@@ -1,5 +1,6 @@
 import { appUrl } from "../paths";
 import { state } from "../state";
+import { AUDIO_ACCEPT } from "../tasks/import";
 import { urlTaskActive } from "../tasks/url-download";
 import type { Project } from "../types";
 import { escapeHtml, statusLabel } from "./format";
@@ -59,7 +60,9 @@ export function renderDetail(project: Project): string {
         </div>
       </section>
       ${
-    project.sourceName
+    project.sourceName && project.sourceRemoved && !busy
+      ? `<section class="empty-card compact source-removed"><h3>Source audio removed</h3><p class="muted">It was deleted after separation to save space. Import it again to re-separate.</p></section>`
+      : project.sourceName
       ? `<section class="process-card">
               <button class="button primary" data-action="${
         busy ? "cancel" : "separate"
@@ -76,9 +79,16 @@ export function renderDetail(project: Project): string {
           ? "Retry separation"
           : "Separate five stems"
       }</button>
-              <div class="progress-track"><span style="width:${
-        Math.max(0, Math.min(100, state.progress))
-      }%"></span></div>
+              <label class="check-row"><input type="checkbox" data-action="delete-source-option" ${
+        project.deleteSourceAfterSeparation ? "checked" : ""
+      } ${
+        busy ? "disabled" : ""
+      } /> Delete the source audio after separating <small class="muted">(saves space; re-separating needs the file again)</small></label>
+              <div class="progress-track" role="progressbar" aria-label="Separation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${
+        progressValue()
+      }" aria-valuetext="${
+        escapeHtml(progressText(project))
+      }"><span style="width:${progressValue()}%"></span></div>
               <div class="progress-copy"><span>${
         escapeHtml(state.progressLabel || statusLabel(project.status))
       }</span><span>${busy ? `${state.progress}%` : ""}</span></div>
@@ -95,7 +105,7 @@ export function renderDetail(project: Project): string {
 }
 
 export function fileInputMarkup(): string {
-  return `<input id="audio-file" type="file" accept="audio/*,.mp3,.wav,.m4a,.flac,.ogg,.opus,.webm" hidden />`;
+  return `<input id="audio-file" type="file" accept="${AUDIO_ACCEPT}" hidden />`;
 }
 
 export function messageMarkup(message: string): string {
@@ -104,7 +114,20 @@ export function messageMarkup(message: string): string {
   }</span><button data-action="dismiss" aria-label="Dismiss">×</button></div>`;
 }
 
+function progressValue(): number {
+  return Math.round(Math.max(0, Math.min(100, state.progress)));
+}
+
+function progressText(project?: Project): string {
+  const stage = state.progressLabel ||
+    (project ? statusLabel(project.status) : "");
+  return `${stage} · ${progressValue()}%`;
+}
+
 export function updateProgressDisplay(): void {
+  const track = document.querySelector<HTMLElement>(".progress-track");
+  track?.setAttribute("aria-valuenow", String(progressValue()));
+  track?.setAttribute("aria-valuetext", progressText());
   const bar = document.querySelector<HTMLElement>(".progress-track span");
   const stage = document.querySelector<HTMLElement>(
     ".progress-copy span:first-child",

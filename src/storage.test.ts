@@ -120,6 +120,30 @@ describe("project stems", () => {
     expect(await getPeaks(project.id)).toEqual({});
   });
 
+  it("deletes the source after separation only when asked", async () => {
+    const kept = await saveProject(newProject("keep source"));
+    const dropped = await saveProject({
+      ...newProject("drop source"),
+      deleteSourceAfterSeparation: true,
+    });
+    await replaceSource(kept, new Blob(["k"]), "k.wav");
+    await replaceSource(dropped, new Blob(["d"]), "d.wav");
+
+    expect((await completeSeparation(kept.id, stems("k"))).sourceRemoved)
+      .toBeFalsy();
+    const done = await completeSeparation(dropped.id, stems("d"));
+
+    expect(done.sourceRemoved).toBe(true);
+    expect(done.sourceName).toBe("d.wav");
+    expect(await getSource(dropped.id)).toBeUndefined();
+    expect(await text((await getStem(dropped.id, "bass"))?.blob)).toBe("d-bass");
+    expect(await text((await getSource(kept.id))?.blob)).toBe("k");
+
+    const reimported = await replaceSource(done, new Blob(["d2"]), "d2.wav");
+    expect(reimported.sourceRemoved).toBe(false);
+    expect(await text((await getSource(dropped.id))?.blob)).toBe("d2");
+  });
+
   it("deletes only the deleted project's source and stems", async () => {
     const kept = await saveProject(newProject("kept"));
     const removed = await saveProject(newProject("removed"));
