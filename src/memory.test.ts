@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { estimateSeparationBytes, isLongForDevice } from "./memory";
+import {
+  estimateSeparationBytes,
+  isLongForDevice,
+  playbackEngineFor,
+} from "./memory";
 
 const MB = 1024 ** 2;
 const FRAMES_PER_MINUTE = 44_100 * 60;
@@ -41,3 +45,17 @@ describe("separation memory estimate", () => {
     ).toBe(false);
   });
 });
+
+describe("playback engine choice", () => {
+  it("plays from decoded buffers unless they are too much for the device", () => {
+    const fiveMinutes = 5 * FRAMES_PER_MINUTE;
+    // 5 stems × 5 minutes decoded is about 265 MB.
+    expect(playbackEngineFor(fiveMinutes, 5, 8)).toBe("buffer");
+    expect(playbackEngineFor(fiveMinutes, 5, 4)).toBe("buffer");
+    expect(playbackEngineFor(fiveMinutes, 5, 1)).toBe("media");
+    expect(playbackEngineFor(20 * FRAMES_PER_MINUTE, 5, 4)).toBe("media");
+    // Unknown device memory (Firefox, Safari): decoded buffers.
+    expect(playbackEngineFor(20 * FRAMES_PER_MINUTE, 5, undefined)).toBe("buffer");
+  });
+});
+
