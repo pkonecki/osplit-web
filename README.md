@@ -54,6 +54,17 @@ npx playwright test
 
 They separate a short generated clip with the real models, so the first run
 takes a minute or two. CI runs both suites on every pull request.
+
+`e2e/csp.spec.ts` runs separately, against the Docker image, and fails on any
+Content-Security-Policy violation. CI runs it after building the image; run it
+locally with the container started (see Docker below):
+
+```bash
+DOCKER_URL=http://localhost:8080/ npx playwright test
+```
+
+The URL-download part needs internet access (it loads Pyodide from jsDelivr);
+set `NO_EXTERNAL_NETWORK=1` to skip it.
 The PWA can be deployed independently as a static site; production deployment
 requires HTTPS and the cross-origin isolation headers documented below.
 
@@ -83,6 +94,25 @@ but browser quota and eviction policies still apply. Stems are stored as
 lossless FLAC, typically about half the size of WAV. Exports are FLAC by
 default, or WAV when chosen in the mixer, and are saved through the browser's
 download handling.
+
+## Installing the app
+
+Installed from the browser (Install app, or Add to Home Screen), OSplit opens
+in its own window and works offline once the models are cached. In Chromium
+browsers the installed app also:
+
+- appears in the system share sheet on Android: sharing an audio file to
+  OSplit creates a project from it;
+- can open audio files from the desktop ("Open with OSplit").
+
+Both need the app to be installed and are not available in Firefox or Safari.
+In any browser, dropping an audio file on the project list creates a project,
+and dropping one on a project replaces its source audio. A project can delete
+its source audio once separation succeeds, to save space; separating it again
+then needs the file imported again.
+
+The PNG icons in `public/icons/` are generated from `public/icon.svg`; run
+`node scripts/icons.mjs` after changing the SVG.
 
 For further browser details, see
 [`public/README-web.html`](./public/README-web.html).
@@ -139,7 +169,23 @@ Pages' soft bandwidth limit of 100 GB per month.
 
 For Nginx, the included [`deploy/nginx.conf`](./deploy/nginx.conf) demonstrates
 the required headers and cache behavior. If configuring another static host,
-apply equivalent rules to its responses.
+apply equivalent rules to its responses. Every response also gets the headers
+in [`deploy/security-headers.conf`](./deploy/security-headers.conf):
+
+```text
+X-Content-Type-Options: nosniff
+Referrer-Policy: no-referrer
+Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; …
+```
+
+The policy allows jsDelivr scripts (Pyodide and the FFmpeg core used by URL
+downloads), `connect-src https:` (URL downloads fetch the page entered) and
+inline style attributes. With `nosniff`, the declared types matter: serve
+`.mjs` as JavaScript (ONNX Runtime loads one as a module) and `.wasm` as
+`application/wasm`. The Docker build also writes gzip copies of the `.wasm`
+files (`PRECOMPRESS=1`), which nginx sends with `gzip_static`: the ONNX Runtime
+download shrinks from about 29 MB to about 7 MB. GitHub Pages can't send these
+headers, so the Pages site has no Content-Security-Policy.
 
 After deployment, verify that the homepage, `/sw.js`, `/manifest.webmanifest`,
 `/yt-dlp/wheel.json`, and at least one file under `/models/` load successfully

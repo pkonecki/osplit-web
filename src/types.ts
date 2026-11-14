@@ -23,6 +23,10 @@ export interface Project {
   mutedStems: Stem[];
   /** Soloed stems. Missing on projects saved before solo existed. */
   soloStems?: Stem[];
+  /** Delete the source audio once separation succeeds (saves space). */
+  deleteSourceAfterSeparation?: boolean;
+  /** The source audio was deleted after separation; re-import to separate. */
+  sourceRemoved?: boolean;
   errorMessage: string | null;
 }
 

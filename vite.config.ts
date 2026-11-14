@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { constants, gzipSync } from "node:zlib";
 import { defineConfig, type Plugin } from "vite";
 
 const webDirectory = dirname(fileURLToPath(import.meta.url));
@@ -43,6 +44,24 @@ const SHELL_FILES = [
   "icon.svg",
   "README-web.html",
 ];
+
+/**
+ * Writes a gzip copy next to each WebAssembly file, for servers that send
+ * precompressed files (nginx gzip_static in the Docker image): the ONNX
+ * Runtime file shrinks from about 29 MB to about 7 MB. Only the Docker build
+ * sets PRECOMPRESS, so the GitHub Pages artifact doesn't carry the copies.
+ */
+function precompressWasm(dist: string): void {
+  const assets = resolve(dist, "assets");
+  for (const name of readdirSync(assets)) {
+    if (!name.endsWith(".wasm")) continue;
+    const file = resolve(assets, name);
+    writeFileSync(
+      `${file}.gz`,
+      gzipSync(readFileSync(file), { level: constants.Z_BEST_COMPRESSION }),
+    );
+  }
+}
 
 function replaceOnce(source: string, token: string, value: string): string {
   if (source.split(token).length !== 2) {
@@ -208,6 +227,7 @@ function serveAndPackageModels(): Plugin {
         JSON.stringify(modelManifest(), null, 2),
       );
       cpSync(ytDlpRoot, resolve(outDir, "yt-dlp"), { recursive: true });
+      if (process.env.PRECOMPRESS === "1") precompressWasm(outDir);
     },
   };
 }
