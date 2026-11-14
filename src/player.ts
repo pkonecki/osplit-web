@@ -1,8 +1,10 @@
 import { stemFrameCount } from "./audio-format";
+import { stemVolume } from "./mixing";
 import { playbackEngineFor } from "./memory";
 import { BufferEngine } from "./player/buffer-engine";
 import type { PlaybackEngine, PlayerTime, StemAudio } from "./player/engine";
 import { MediaEngine } from "./player/media-engine";
+import { stopMediaSession } from "./player/media-session";
 import { getStem } from "./storage";
 import { type Project, type Stem, STEM_LABELS } from "./types";
 
@@ -21,10 +23,23 @@ let loading = false;
 let audioContext: AudioContext | undefined;
 let progressTimer: number | undefined;
 let onTick: () => void = () => {};
+let onLoaded: (project: Project) => void = () => {};
 
 /** Sets what runs on every player clock tick and seek (the time display). */
 export function setPlayerTick(tick: () => void): void {
   onTick = tick;
+}
+
+/** Sets what runs once a project's stems are ready to play. */
+export function setPlayerLoaded(loaded: (project: Project) => void): void {
+  onLoaded = loaded;
+}
+
+/** A stem's decoded channels, when the player holds them (buffer engine). */
+export function decodedChannels(
+  stem: Stem,
+): [Float32Array, Float32Array] | null {
+  return engine?.channels(stem) ?? null;
 }
 
 /** Position, duration and state; `ready` is false while stems are loading. */
@@ -88,6 +103,7 @@ export async function preparePlayers(project: Project): Promise<void> {
       engine?.tick();
       onTick();
     }, 250);
+    onLoaded(project);
   } finally {
     if (token === loadToken) {
       loading = false;
@@ -104,15 +120,14 @@ export function releasePlayers(): void {
   playerProjectId = null;
   loading = false;
   loadToken++;
+  stopMediaSession();
 }
 
 export async function pauseAll(): Promise<void> {
   engine?.pause();
 }
 
-export function stemVolume(project: Project, stem: Stem): number {
-  return project.mutedStems.includes(stem) ? 0 : project.volumes[stem];
-}
+export { stemVolume };
 
 export function applyStemVolume(project: Project, stem: Stem): void {
   engine?.setGain(stem, stemVolume(project, stem));

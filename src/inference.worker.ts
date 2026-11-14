@@ -8,6 +8,7 @@ import {
   SEGMENT_FRAMES,
 } from "./audio-core";
 import { FlacEncoder } from "./flac";
+import { PeakBuilder } from "./peaks";
 import {
   logitsToMasks,
   OverlapAddSynthesizer,
@@ -85,7 +86,7 @@ async function separate(
       sessions = await loadSessions(quality, id, provider);
     }
 
-    let outputs: Record<Stem, Blob>;
+    let outputs: SeparationResult;
     try {
       outputs = await runSeparation(request.samples, sessions, id, quality);
     } catch (error) {
@@ -101,7 +102,7 @@ async function separate(
       self.postMessage({ type: "cancelled", id } satisfies WorkerResponse);
     } else {
       self.postMessage(
-        { type: "complete", id, stems: outputs } satisfies WorkerResponse,
+        { type: "complete", id, ...outputs } satisfies WorkerResponse,
       );
     }
   } catch (error) {
@@ -173,12 +174,17 @@ async function releaseSessions(
   );
 }
 
+interface SeparationResult {
+  stems: Record<Stem, Blob>;
+  peaks: Record<Stem, Float32Array>;
+}
+
 async function runSeparation(
   interleavedSamples: Float32Array,
   sessions: Partial<Record<Stem, ort.InferenceSession>>,
   id: string,
   quality: Quality,
-): Promise<Record<Stem, Blob>> {
+): Promise<SeparationResult> {
   if (
     interleavedSamples.length === 0 ||
     interleavedSamples.length % CHANNELS !== 0
@@ -186,7 +192,7 @@ async function runSeparation(
     throw new Error("The decoded source has no valid stereo samples.");
   }
   const frameCount = interleavedSamples.length / CHANNELS;
-  const encoders = await separateIntoFlac(
+  const { encoders, peakBuilders } = await separateIntoFlac(
     interleavedSamples,
     frameCount,
     sessions,
@@ -197,15 +203,18 @@ async function runSeparation(
   // finish() copies each stem's frames into its Blob: one stem at a time, so
   // only one extra copy exists at once.
   const stems = {} as Record<Stem, Blob>;
+  const peaks = {} as Record<Stem, Float32Array>;
   STEMS.forEach((stem, index) => {
     stems[stem] = encoders[index].finish();
+    peaks[stem] = peakBuilders[index].result();
   });
-  return stems;
+  return { stems, peaks };
 }
 
 /**
  * Runs the models over the input and encodes each stem to FLAC as its samples
- * become final, so no full-length copy of the output is kept.
+ * become final, so no full-length copy of the output is kept. The same
+ * samples feed each stem's waveform overview.
  */
 async function separateIntoFlac(
   interleavedSamples: Float32Array,
@@ -213,12 +222,16 @@ async function separateIntoFlac(
   sessions: Partial<Record<Stem, ort.InferenceSession>>,
   id: string,
   quality: Quality,
-): Promise<FlacEncoder[]> {
+): Promise<{ encoders: FlacEncoder[]; peakBuilders: PeakBuilder[] }> {
   const plan = planStft(frameCount);
   const encoders = STEMS.map(() => new FlacEncoder());
+  const peakBuilders = STEMS.map(() => new PeakBuilder(frameCount));
   const synthesizer = new OverlapAddSynthesizer(plan, {
     sourceCount: STEMS.length,
-    onSamples: (source, pcm) => encoders[source].push(pcm),
+    onSamples: (source, pcm) => {
+      encoders[source].push(pcm);
+      peakBuilders[source].push(pcm);
+    },
   });
   const analyzer = new SegmentAnalyzer(interleavedSamples, plan);
   const logits = new Float32Array(
@@ -262,7 +275,7 @@ async function separateIntoFlac(
     );
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }
-  return encoders;
+  return { encoders, peakBuilders };
 }
 
 let lastDownloadReport = "";

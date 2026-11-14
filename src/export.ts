@@ -11,9 +11,11 @@ import {
 import { decodeStem } from "./audio-decode";
 import { type AudioFormat, detectAudioFormat } from "./audio-format";
 import { encodeFlac } from "./flac";
+import { stemVolume } from "./mixing";
 import { getStem } from "./storage";
 import { type Project, type Stem, STEM_LABELS, STEMS } from "./types";
 import { safeFileName } from "./view/format";
+import { createZip, type ZipEntry } from "./zip";
 
 const EXPORT_FORMAT_KEY = "osplit-export-format";
 
@@ -57,10 +59,37 @@ export async function exportStem(project: Project, stem: Stem): Promise<void> {
 }
 
 export async function exportMix(project: Project): Promise<void> {
+  const format = exportFormat();
+  downloadBlob(
+    await mixFile(project, format),
+    `${safeFileName(project.name)}-mix.${format}`,
+  );
+}
+
+/**
+ * Downloads one zip with every stem and the current mix, in the chosen
+ * format. Stems already in that format go in as they are stored.
+ */
+export async function exportAll(project: Project): Promise<void> {
+  const format = exportFormat();
+  const base = safeFileName(project.name);
+  const entries: ZipEntry[] = [];
+  for (const stem of STEMS.filter((s) => project.completedStems.includes(s))) {
+    const stored = await getStem(project.id, stem);
+    if (!stored) throw new Error(`The ${STEM_LABELS[stem]} stem is missing.`);
+    entries.push({
+      name: `${base}-${stem}.${format}`,
+      data: await stemFile(stored.blob, format),
+    });
+  }
+  entries.push({ name: `${base}-mix.${format}`, data: await mixFile(project, format) });
+  downloadBlob(await createZip(entries), `${base}-stems.zip`);
+}
+
+/** The current mix as a file: mute, solo and volumes, as the player plays it. */
+async function mixFile(project: Project, format: AudioFormat): Promise<Blob> {
   const active = STEMS.filter((stem) =>
-    project.completedStems.includes(stem) &&
-    !project.mutedStems.includes(stem) &&
-    project.volumes[stem] > 0
+    project.completedStems.includes(stem) && stemVolume(project, stem) > 0
   );
   const records = await Promise.all(
     active.map((stem) => getStem(project.id, stem)),
@@ -71,12 +100,10 @@ export async function exportMix(project: Project): Promise<void> {
   const decoded = await Promise.all(
     records.map((record) => decodeStem(record!.blob)),
   );
-  const mixed = mixStems(decoded, active.map((stem) => project.volumes[stem]));
-  const format = exportFormat();
-  const file = format === "wav"
+  const mixed = mixStems(decoded, active.map((stem) => stemVolume(project, stem)));
+  return format === "wav"
     ? encodeWav(mixed, mixed.length / CHANNELS)
     : encodeFlac(Int16Array.from(mixed, toPcm16));
-  downloadBlob(file, `${safeFileName(project.name)}-mix.${format}`);
 }
 
 export function downloadBlob(blob: Blob, name: string): void {

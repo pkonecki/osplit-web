@@ -94,6 +94,13 @@ export class BufferEngine implements PlaybackEngine {
     if (node) node.gain.value = gain;
   }
 
+  channels(stem: Stem): [Float32Array, Float32Array] | null {
+    const buffer = this.buffers.get(stem);
+    if (!buffer) return null;
+    const left = buffer.getChannelData(0);
+    return [left, buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : left];
+  }
+
   tick(): void {
     // The end is handled by the sources' ended event.
   }

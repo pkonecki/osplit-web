@@ -8,7 +8,13 @@ export type InferenceRequest =
 /** Inference worker → page. */
 export type InferenceResponse =
   | { type: "progress"; id: string; stage: string; progress: number }
-  | { type: "complete"; id: string; stems: Record<Stem, Blob> }
+  | {
+    type: "complete";
+    id: string;
+    stems: Record<Stem, Blob>;
+    /** Waveform overview per stem (see src/peaks.ts). */
+    peaks: Record<Stem, Float32Array>;
+  }
   | { type: "error"; id: string; message: string }
   | { type: "cancelled"; id: string };
 

@@ -1,7 +1,9 @@
 import { exportFormat } from "../export";
+import { soloStems, stemVolume } from "../mixing";
 import { playerTime } from "../player";
 import { type Project, STEM_LABELS, STEMS } from "../types";
 import { formatTime } from "./format";
+import { updatePlayheads, waveformMarkup } from "./waveforms";
 
 export function renderMixer(project: Project): string {
   const time = playerTime();
@@ -16,6 +18,7 @@ export function renderMixer(project: Project): string {
             <option value="wav" ${format === "wav" ? "selected" : ""}>WAV · most compatible</option>
           </select>
           <button class="button outline" data-action="export-mix">Export full mix</button>
+          <button class="button outline" data-action="export-all">Export all (zip)</button>
         </div>
       </div>
       <div class="player-row">
@@ -36,13 +39,20 @@ export function renderMixer(project: Project): string {
     STEMS.filter((stem) => project.completedStems.includes(stem)).map((
       stem,
     ) => `
-          <div class="stem-control">
+          <div class="stem-control" tabindex="0" data-stem-row="${stem}" aria-label="${
+      STEM_LABELS[stem]
+    } (M to mute, S to solo)">
             <span class="stem-label">${STEM_LABELS[stem]}</span>
             <input type="range" min="0" max="1" step="0.01" value="${
       project.volumes[stem]
     }" data-action="volume" data-stem="${stem}" aria-label="${
       STEM_LABELS[stem]
     } volume" ${project.mutedStems.includes(stem) ? "disabled" : ""} />
+            <button class="solo-button ${
+      soloStems(project).includes(stem) ? "soloed" : ""
+    }" data-action="solo" data-stem="${stem}" aria-pressed="${
+      soloStems(project).includes(stem)
+    }" aria-label="Solo ${STEM_LABELS[stem]}">S</button>
             <button class="mute-button ${
       project.mutedStems.includes(stem) ? "muted" : ""
     }" data-action="mute" data-stem="${stem}" aria-label="${
@@ -51,6 +61,7 @@ export function renderMixer(project: Project): string {
       project.mutedStems.includes(stem) ? "◖×" : "◖))"
     }</button>
             <button class="button text-button" data-action="export-stem" data-stem="${stem}">Export</button>
+            ${waveformMarkup(stem, stemVolume(project, stem) === 0)}
           </div>
         `).join("")
   }
@@ -76,6 +87,7 @@ export function updatePlayerDisplay(): void {
   play.textContent = playGlyph(time);
   play.setAttribute("aria-label", playLabel(time));
   play.disabled = !time.ready;
+  updatePlayheads();
 }
 
 function playGlyph(time: ReturnType<typeof playerTime>): string {
