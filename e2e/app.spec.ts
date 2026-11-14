@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
 import {
   createProjectWithClip,
   instrument,
@@ -167,22 +168,45 @@ test("separates a clip and mixes the stems", async ({ page }) => {
   const writes = (await page.evaluate(() => window.__projectWrites)) - writesBefore;
   expect(writes).toBeLessThanOrEqual(Math.ceil(seconds) + 6);
 
-  // Five stems with the clip's length, models cached under checksum keys.
-  const stems = await readStore<{ id: string; blob: Blob }>(page, "stems");
-  expect(stems).toHaveLength(5);
-  const sizes = await page.evaluate(async () => {
+  // Five FLAC stems that decode to the clip's length; models cached under
+  // checksum keys.
+  const stems = await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve) => {
       const request = indexedDB.open("osplit-pwa");
       request.onsuccess = () => resolve(request.result);
     });
-    const records = await new Promise<{ blob: Blob }[]>((resolve) => {
+    const records = await new Promise<{ name: string; blob: Blob }[]>((resolve) => {
       const request = db.transaction("stems").objectStore("stems").getAll();
       request.onsuccess = () => resolve(request.result);
     });
     db.close();
-    return records.map((record) => record.blob.size);
+    return Promise.all(records.map(async (record) => {
+      const bytes = await record.blob.arrayBuffer();
+      const magic = String.fromCharCode(...new Uint8Array(bytes.slice(0, 4)));
+      const decoded = await new OfflineAudioContext(2, 1, 44_100)
+        .decodeAudioData(bytes.slice(0));
+      return {
+        name: record.name,
+        type: record.blob.type,
+        magic,
+        size: record.blob.size,
+        frames: decoded.length,
+        channels: decoded.numberOfChannels,
+      };
+    }));
   });
-  expect(new Set(sizes)).toEqual(new Set([44 + 44_100 * 3 * 4]));
+  expect(stems).toHaveLength(5);
+  for (const stem of stems) {
+    expect(stem).toMatchObject({
+      type: "audio/flac",
+      magic: "fLaC",
+      frames: 44_100 * 3,
+      channels: 2,
+    });
+    expect(stem.name).toMatch(/\.flac$/);
+    // Smaller than the 16-bit WAV it replaces.
+    expect(stem.size).toBeLessThan(44 + 44_100 * 3 * 4);
+  }
   const modelKeys = await readStore<string>(page, "models", "keys");
   expect(modelKeys.filter((key) => /^fp16\/\w+\.fp16\.onnx@[0-9a-f]{64}$/.test(key)))
     .toHaveLength(5);
@@ -211,10 +235,30 @@ test("separates a clip and mixes the stems", async ({ page }) => {
   await page.click('[data-action="mute"][data-stem="drums"]');
   expect(await page.evaluate(() => window.__gains[2].gain.value)).toBe(1);
 
-  // Export one stem.
-  const download = page.waitForEvent("download");
+  // Export one stem, as FLAC by default and as WAV when chosen.
+  const flacDownload = page.waitForEvent("download");
   await page.click('[data-action="export-stem"][data-stem="vocals"]');
-  expect((await download).suggestedFilename()).toBe("E2E clip-vocals.wav");
+  const flac = await flacDownload;
+  expect(flac.suggestedFilename()).toBe("E2E clip-vocals.flac");
+  expect(readFileSync(await flac.path()).subarray(0, 4).toString()).toBe("fLaC");
+
+  await page.selectOption('[data-action="export-format"]', "wav");
+  const wavDownload = page.waitForEvent("download");
+  await page.click('[data-action="export-stem"][data-stem="vocals"]');
+  const wav = await wavDownload;
+  expect(wav.suggestedFilename()).toBe("E2E clip-vocals.wav");
+  const wavBytes = readFileSync(await wav.path());
+  expect(wavBytes.subarray(0, 4).toString()).toBe("RIFF");
+  expect(wavBytes.length).toBe(44 + 44_100 * 3 * 4);
+
+  // The choice is remembered, and also applies to the mix.
+  await page.reload();
+  await expect(page.locator('[data-action="export-format"]')).toHaveValue("wav");
+  const mixDownload = page.waitForEvent("download");
+  await page.click('[data-action="export-mix"]');
+  const mix = await mixDownload;
+  expect(mix.suggestedFilename()).toBe("E2E clip-mix.wav");
+  expect(readFileSync(await mix.path()).length).toBe(44 + 44_100 * 3 * 4);
 });
 
 test("warns about a long track on a low-memory device", async ({ page, context }) => {

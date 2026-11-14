@@ -79,8 +79,10 @@ the SHA-256 digest published by PyPI.
 
 Projects are scoped to this browser profile and device. Clearing site data
 removes them. OSplit asks the browser to preserve its storage when supported,
-but browser quota and eviction policies still apply. Exported WAV files are
-saved through the browser's download handling.
+but browser quota and eviction policies still apply. Stems are stored as
+lossless FLAC, typically about half the size of WAV. Exports are FLAC by
+default, or WAV when chosen in the mixer, and are saved through the browser's
+download handling.
 
 For further browser details, see
 [`public/README-web.html`](./public/README-web.html).

@@ -1,3 +1,4 @@
+import { audioExtension } from "./audio-format";
 import {
   type ModelRecord,
   type Project,
@@ -274,7 +275,7 @@ export async function putStem(
   const value: StoredBlob = {
     id: `${projectId}:${stem}`,
     blob,
-    name: `${stem}.wav`,
+    name: `${stem}.${audioExtension(blob)}`,
   };
   await transaction(
     [STEM_BLOBS],
@@ -315,7 +316,7 @@ export async function completeSeparation(
         const value: StoredBlob = {
           id: `${projectId}:${stem}`,
           blob: output[stem],
-          name: `${stem}.wav`,
+          name: `${stem}.${audioExtension(output[stem])}`,
         };
         tx.objectStore(STEM_BLOBS).put(value);
       });

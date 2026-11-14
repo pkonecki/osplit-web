@@ -9,6 +9,7 @@ import {
   LOGIT_SCALE,
   logitsToMasks,
   OverlapAddSynthesizer,
+  type PcmStream,
   planStft,
   type StemOutput,
   SegmentAnalyzer,
@@ -144,6 +145,44 @@ describe("16-bit output", () => {
     for (let stem = 0; stem < 3; stem++) {
       for (let i = 0; i < samples.length; i++) {
         if (pcm[stem][i] !== toPcm16(floats[stem][i])) mismatches++;
+      }
+    }
+    expect(mismatches).toBe(0);
+  }, 60_000);
+
+  it("streams the same samples as full-length 16-bit outputs", () => {
+    const samples = testSignal(SAMPLE_RATE * 13);
+    const plan = planStft(samples.length / CHANNELS);
+    const run = (outputs: StemOutput[] | PcmStream) => {
+      const analyzer = new SegmentAnalyzer(samples, plan);
+      const synthesizer = new OverlapAddSynthesizer(plan, outputs);
+      const masks = new Float32Array(2 * STRIDE);
+      for (let segment = 0; segment < plan.segmentCount; segment++) {
+        analyzer.analyze(segment);
+        for (let i = 0; i < masks.length; i++) masks[i] = Math.sin(i * 0.07);
+        logitsToMasks(masks, 2, segmentFrames(plan, segment));
+        synthesizer.synthesize(segment, analyzer.spectra, masks);
+      }
+    };
+    const full = [new Int16Array(samples.length), new Int16Array(samples.length)];
+    run(full);
+    const streamed = [new Int16Array(samples.length), new Int16Array(samples.length)];
+    const written = [0, 0];
+    let calls = 0;
+    run({
+      sourceCount: 2,
+      onSamples(source, pcm) {
+        streamed[source].set(pcm, written[source]);
+        written[source] += pcm.length;
+        calls++;
+      },
+    });
+    expect(written).toEqual([samples.length, samples.length]);
+    expect(calls).toBe(2 * plan.segmentCount);
+    let mismatches = 0;
+    for (let stem = 0; stem < 2; stem++) {
+      for (let i = 0; i < samples.length; i++) {
+        if (streamed[stem][i] !== full[stem][i]) mismatches++;
       }
     }
     expect(mismatches).toBe(0);

@@ -36,6 +36,10 @@ jobs:
       - name: Type check
         run: deno task check
 
+      # The FLAC tests decode with the reference flac tool (FFmpeg locally).
+      - name: Install flac
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq flac
+
       - name: Unit tests
         run: deno task test
 

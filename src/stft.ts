@@ -157,6 +157,19 @@ export function logitsToMasks(
 export type StemOutput = Float32Array | Int16Array;
 
 /**
+ * Streaming output: after each segment, the samples that became final are
+ * passed per stem as interleaved 16-bit PCM. The array is reused for the next
+ * segment, so `onSamples` must consume (copy or encode) it right away.
+ */
+export interface PcmStream {
+  sourceCount: number;
+  onSamples(source: number, interleaved: Int16Array): void;
+}
+
+/** Most frames one segment can finish: one hop per analysis frame. */
+const MAX_FRAMES_PER_SEGMENT = SEGMENT_FRAMES * HOP_LENGTH;
+
+/**
  * Applies masks to the analysed spectra and rebuilds one interleaved stereo
  * signal per stem by inverse FFT and overlap-add. Segments must be
  * synthesized in order; each call writes the output samples that no later
@@ -170,21 +183,37 @@ export class OverlapAddSynthesizer {
   private readonly plan: StftPlan;
   private readonly outputs: StemOutput[];
   private readonly pcm16: boolean;
+  private readonly stream: PcmStream | null;
   private nextSampleToWrite = 0;
 
   /**
    * `outputs`: one interleaved stereo buffer of frameCount frames per stem,
-   * all Float32Array or all Int16Array.
+   * all Float32Array or all Int16Array; or a PcmStream that receives each
+   * segment's final samples instead.
    */
-  constructor(plan: StftPlan, outputs: StemOutput[]) {
+  constructor(plan: StftPlan, outputs: StemOutput[] | PcmStream) {
     this.plan = plan;
-    this.outputs = outputs;
-    this.pcm16 = outputs[0] instanceof Int16Array;
-    if (outputs.some((output) => (output instanceof Int16Array) !== this.pcm16)) {
-      throw new Error("Stem outputs must all have the same sample type.");
+    if (Array.isArray(outputs)) {
+      this.outputs = outputs;
+      this.stream = null;
+      this.pcm16 = outputs[0] instanceof Int16Array;
+      if (
+        outputs.some((output) => (output instanceof Int16Array) !== this.pcm16)
+      ) {
+        throw new Error("Stem outputs must all have the same sample type.");
+      }
+    } else {
+      // Staging buffers for one segment, reused for every segment.
+      const frames = Math.min(MAX_FRAMES_PER_SEGMENT, plan.frameCount);
+      this.outputs = Array.from(
+        { length: outputs.sourceCount },
+        () => new Int16Array(frames * CHANNELS),
+      );
+      this.stream = outputs;
+      this.pcm16 = true;
     }
     this.overlap = Array.from(
-      { length: outputs.length * CHANNELS },
+      { length: this.outputs.length * CHANNELS },
       () => new Float32Array(OVERLAP_BUFFER_SIZE),
     );
   }
@@ -196,6 +225,12 @@ export class OverlapAddSynthesizer {
     const paddedFrameLimit = this.plan.frameCount + FRAME_LENGTH;
     const firstFrame = segment * SEGMENT_FRAMES;
     const validFrames = segmentFrames(this.plan, segment);
+    // Streaming writes this segment's frames from the start of the staging
+    // buffers; full buffers are indexed by absolute frame.
+    const firstOutputFrame =
+      Math.max(this.nextSampleToWrite, FRAME_LENGTH) - FRAME_LENGTH;
+    const frameOffset = this.stream ? firstOutputFrame : 0;
+    let endOutputFrame = firstOutputFrame;
 
     for (let time = 0; time < validFrames; time++) {
       const startSample = (firstFrame + time) * HOP_LENGTH;
@@ -227,7 +262,7 @@ export class OverlapAddSynthesizer {
       const safeEnd = Math.min(startSample + HOP_LENGTH, paddedFrameLimit);
       const writeStart = Math.max(this.nextSampleToWrite, FRAME_LENGTH);
       for (let sample = writeStart; sample < safeEnd; sample++) {
-        const outputFrame = sample - FRAME_LENGTH;
+        const outputFrame = sample - FRAME_LENGTH - frameOffset;
         const ring = sample % OVERLAP_BUFFER_SIZE;
         if (this.pcm16) {
           for (let source = 0; source < sourceCount; source++) {
@@ -247,7 +282,20 @@ export class OverlapAddSynthesizer {
         }
         for (const buffer of overlap) buffer[ring] = 0;
       }
+      endOutputFrame = Math.max(endOutputFrame, safeEnd - FRAME_LENGTH);
       this.nextSampleToWrite = startSample + HOP_LENGTH;
+    }
+
+    if (this.stream) {
+      const frames = endOutputFrame - firstOutputFrame;
+      if (frames > 0) {
+        for (let source = 0; source < sourceCount; source++) {
+          this.stream.onSamples(
+            source,
+            (outputs[source] as Int16Array).subarray(0, frames * CHANNELS),
+          );
+        }
+      }
     }
   }
 }
