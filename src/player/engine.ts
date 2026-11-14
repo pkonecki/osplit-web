@@ -20,6 +20,8 @@ export interface PlaybackEngine {
   pause(): void;
   seek(seconds: number): void;
   setGain(stem: Stem, gain: number): void;
+  /** A stem's decoded left and right channels, when the engine has them. */
+  channels(stem: Stem): [Float32Array, Float32Array] | null;
   /** Called every 250 ms while the project page is open. */
   tick(): void;
   release(): void;

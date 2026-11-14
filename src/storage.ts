@@ -12,6 +12,7 @@ const PROJECTS = "projects";
 const SOURCES = "sources";
 const STEM_BLOBS = "stems";
 const MODELS = "models";
+const PEAKS = "peaks";
 
 /**
  * Schema changes, in order: migration N upgrades the database from version N
@@ -26,6 +27,10 @@ export const MIGRATIONS: ReadonlyArray<
     db.createObjectStore(SOURCES, { keyPath: "id" });
     db.createObjectStore(STEM_BLOBS, { keyPath: "id" });
     db.createObjectStore(MODELS, { keyPath: "key" });
+  },
+  // 2: waveform overviews, one record per stem, keyed `${projectId}:${stem}`.
+  (db) => {
+    db.createObjectStore(PEAKS, { keyPath: "id" });
   },
 ];
 
@@ -196,10 +201,11 @@ export async function updateProjectTask(
 export async function deleteProject(id: string): Promise<void> {
   const db = await openDatabase();
   await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction([PROJECTS, SOURCES, STEM_BLOBS], "readwrite");
+    const tx = db.transaction([PROJECTS, SOURCES, STEM_BLOBS, PEAKS], "readwrite");
     tx.objectStore(PROJECTS).delete(id);
     tx.objectStore(SOURCES).delete(id);
     tx.objectStore(STEM_BLOBS).delete(projectStemRange(id));
+    tx.objectStore(PEAKS).delete(projectStemRange(id));
     tx.oncomplete = () => resolve();
     tx.onerror = () =>
       reject(tx.error ?? new Error("Could not delete the project."));
@@ -215,7 +221,7 @@ export async function replaceSource(
 ): Promise<Project> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction([PROJECTS, SOURCES, STEM_BLOBS], "readwrite");
+    const tx = db.transaction([PROJECTS, SOURCES, STEM_BLOBS, PEAKS], "readwrite");
     const projects = tx.objectStore(PROJECTS);
     const sourceRequest = projects.get(project.id);
     let updated: Project | undefined;
@@ -241,6 +247,7 @@ export async function replaceSource(
         { id: project.id, blob: file, name } satisfies StoredBlob,
       );
       tx.objectStore(STEM_BLOBS).delete(projectStemRange(project.id));
+      tx.objectStore(PEAKS).delete(projectStemRange(project.id));
     };
     sourceRequest.onerror = () =>
       reject(
@@ -298,10 +305,11 @@ export function getStem(
 export async function completeSeparation(
   projectId: string,
   output: Record<Stem, Blob>,
+  peaks?: Record<Stem, Float32Array>,
 ): Promise<Project> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction([PROJECTS, STEM_BLOBS], "readwrite");
+    const tx = db.transaction([PROJECTS, STEM_BLOBS, PEAKS], "readwrite");
     const projects = tx.objectStore(PROJECTS);
     const request = projects.get(projectId);
     let updated: Project | undefined;
@@ -319,6 +327,11 @@ export async function completeSeparation(
           name: `${stem}.${audioExtension(output[stem])}`,
         };
         tx.objectStore(STEM_BLOBS).put(value);
+        if (peaks) {
+          tx.objectStore(PEAKS).put(
+            { id: `${projectId}:${stem}`, peaks: peaks[stem] } satisfies StoredPeaks,
+          );
+        }
       });
       updated = {
         ...current,
@@ -342,6 +355,39 @@ export async function completeSeparation(
     tx.onabort = () =>
       reject(tx.error ?? new Error("Saving separated stems was aborted."));
   });
+}
+
+interface StoredPeaks {
+  id: string;
+  peaks: Float32Array;
+}
+
+/** Waveform overviews of a project's stems, for those that have one. */
+export async function getPeaks(
+  projectId: string,
+): Promise<Partial<Record<Stem, Float32Array>>> {
+  const records = await transaction(
+    [PEAKS],
+    "readonly",
+    (tx) => tx.objectStore(PEAKS).getAll(projectStemRange(projectId)) as IDBRequest<
+      StoredPeaks[]
+    >,
+  );
+  return Object.fromEntries(
+    records.map((record) => [record.id.slice(projectId.length + 1), record.peaks]),
+  );
+}
+
+export async function putPeaks(
+  projectId: string,
+  stem: Stem,
+  peaks: Float32Array,
+): Promise<void> {
+  await transaction(
+    [PEAKS],
+    "readwrite",
+    (tx) => tx.objectStore(PEAKS).put({ id: `${projectId}:${stem}`, peaks } satisfies StoredPeaks),
+  );
 }
 
 export async function putModel(record: ModelRecord): Promise<void> {

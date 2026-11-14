@@ -96,6 +96,11 @@ export class MediaEngine implements PlaybackEngine {
     if (node) node.gain.value = gain;
   }
 
+  channels(): null {
+    // Streaming playback never holds the decoded track.
+    return null;
+  }
+
   tick(): void {
     const reference = this.reference;
     if (!reference || reference.paused || reference.seeking) return;

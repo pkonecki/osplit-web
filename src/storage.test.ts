@@ -7,12 +7,14 @@ import {
   deleteModelVariants,
   deleteProject,
   getModel,
+  getPeaks,
   getSource,
   getStem,
   latestModelVariant,
   listProjects,
   MIGRATIONS,
   putModel,
+  putPeaks,
   putStem,
   replaceSource,
   saveProject,
@@ -43,7 +45,7 @@ describe("schema migrations", () => {
     });
     expect(db.version).toBe(MIGRATIONS.length);
     expect([...db.objectStoreNames].sort()).toEqual(
-      ["models", "projects", "sources", "stems"],
+      ["models", "peaks", "projects", "sources", "stems"],
     );
     db.close();
   });
@@ -70,6 +72,8 @@ describe("schema migrations", () => {
     expect((await listProjects()).map((project) => project.name)).toEqual([
       "from v1",
     ]);
+    // Migration 2 added the waveform store to the existing database.
+    expect(await getPeaks(legacy.id)).toEqual({});
   });
 
   it("reports a newer database version from another tab clearly", async () => {
@@ -100,6 +104,22 @@ describe("schema migrations", () => {
 });
 
 describe("project stems", () => {
+  it("stores waveform peaks with the stems and deletes them with the project", async () => {
+    const project = await saveProject(newProject("peaks"));
+    const peaks = Object.fromEntries(
+      STEMS.map((stem, index) => [stem, Float32Array.from([index / 10, 0.5])]),
+    ) as Record<(typeof STEMS)[number], Float32Array>;
+    await completeSeparation(project.id, stems("p"), peaks);
+    expect((await getPeaks(project.id)).drums).toEqual(peaks.drums);
+    await putPeaks(project.id, "vocals", Float32Array.from([1]));
+    expect((await getPeaks(project.id)).vocals).toEqual(Float32Array.from([1]));
+    await replaceSource(project, new Blob(["new"]), "new.wav");
+    expect(await getPeaks(project.id)).toEqual({});
+    await completeSeparation(project.id, stems("q"), peaks);
+    await deleteProject(project.id);
+    expect(await getPeaks(project.id)).toEqual({});
+  });
+
   it("deletes only the deleted project's source and stems", async () => {
     const kept = await saveProject(newProject("kept"));
     const removed = await saveProject(newProject("removed"));

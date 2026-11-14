@@ -67,7 +67,9 @@ export async function separateProject(project: Project): Promise<void> {
     );
     inferenceWorker = worker;
 
-    const stems = await new Promise<Record<Stem, Blob>>((resolve, reject) => {
+    const result = await new Promise<
+      { stems: Record<Stem, Blob>; peaks: Record<Stem, Float32Array> }
+    >((resolve, reject) => {
       rejectInference = reject;
       worker.onmessage = (event: MessageEvent<InferenceResponse>) => {
         const message = event.data;
@@ -78,7 +80,7 @@ export async function separateProject(project: Project): Promise<void> {
           persist.report(message.progress, message.stage);
           updateProgressDisplay();
         } else if (message.type === "complete") {
-          resolve(message.stems);
+          resolve({ stems: message.stems, peaks: message.peaks });
         } else if (message.type === "cancelled") {
           reject(new DOMException("Separation cancelled.", "AbortError"));
         } else {
@@ -104,7 +106,11 @@ export async function separateProject(project: Project): Promise<void> {
     });
 
     await persist.settled();
-    state.selectedProject = await completeSeparation(project.id, stems);
+    state.selectedProject = await completeSeparation(
+      project.id,
+      result.stems,
+      result.peaks,
+    );
     state.progressLabel = "Separation complete";
     if (state.screenMessage === LONG_TRACK_WARNING) state.screenMessage = "";
   } catch (error) {

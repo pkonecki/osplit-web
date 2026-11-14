@@ -1,5 +1,5 @@
 import "./style.css";
-import { exportMix, exportStem, setExportFormat } from "./export";
+import { exportAll, exportMix, exportStem, setExportFormat } from "./export";
 import { enableIsolationReload } from "./isolation";
 import { appUrl } from "./paths";
 import {
@@ -7,11 +7,15 @@ import {
   isPlaying,
   pauseAll,
   playAll,
+  playerTime,
   preparePlayers,
   releasePlayers,
   seekAll,
+  setPlayerLoaded,
   setPlayerTick,
 } from "./player";
+import { soloStems, toggleStem } from "./mixing";
+import { startMediaSession, updateMediaSession } from "./player/media-session";
 import { onRender, state } from "./state";
 import {
   deleteProject,
@@ -41,12 +45,25 @@ import { captureForm, restoreForm } from "./view/form-state";
 import { describeError, escapeHtml } from "./view/format";
 import { updatePlayerDisplay } from "./view/mixer";
 import { renderProjects } from "./view/projects";
+import { showWaveforms, waveformSeekTime } from "./view/waveforms";
 
 const root = document.querySelector<HTMLDivElement>("#app");
 if (!root) throw new Error("The app root element is missing.");
 
 onRender(render);
-setPlayerTick(updatePlayerDisplay);
+setPlayerTick(() => {
+  updatePlayerDisplay();
+  updateMediaSession(playerTime());
+});
+setPlayerLoaded((project) => {
+  void showWaveforms(project).catch(console.warn);
+  startMediaSession(project.name, {
+    play: () => void togglePlay(true).catch(showError),
+    pause: () => void togglePlay(false).catch(showError),
+    seek: seekTo,
+    time: () => playerTime(),
+  });
+});
 installWakeLock();
 void start();
 
@@ -109,6 +126,7 @@ async function render(): Promise<void> {
     // Loading the player (decoding the stems) runs in the background; the
     // play button shows the loading state until it is ready.
     void preparePlayers(state.selectedProject).catch(showError);
+    void showWaveforms(state.selectedProject).catch(console.warn);
   } else {
     releasePlayers();
     root!.innerHTML = await renderProjects();
@@ -203,14 +221,16 @@ async function handleClick(event: Event): Promise<void> {
         await render();
         break;
       case "play":
-        if (isPlaying()) {
-          await pauseAll();
-        } else if (state.selectedProject) await playAll(state.selectedProject);
-        updatePlayerDisplay();
+        await togglePlay(!isPlaying());
         break;
       case "mute":
         if (state.selectedProject && button.dataset.stem) {
           await toggleMute(state.selectedProject, button.dataset.stem as Stem);
+        }
+        break;
+      case "solo":
+        if (state.selectedProject && button.dataset.stem) {
+          await toggleSolo(state.selectedProject, button.dataset.stem as Stem);
         }
         break;
       case "export-stem":
@@ -221,10 +241,81 @@ async function handleClick(event: Event): Promise<void> {
       case "export-mix":
         if (state.selectedProject) await exportMix(state.selectedProject);
         break;
+      case "waveform-seek":
+        seekTo(waveformSeekTime(button, (event as MouseEvent).clientX));
+        break;
+      case "export-all":
+        if (state.selectedProject) await exportAll(state.selectedProject);
+        break;
     }
   } catch (error) {
     state.screenMessage = describeError(error);
     await render();
+  }
+}
+
+/** Plays (`play` true) or pauses the project player. */
+async function togglePlay(play: boolean): Promise<void> {
+  if (!play) await pauseAll();
+  else if (state.selectedProject) await playAll(state.selectedProject);
+  updatePlayerDisplay();
+  updateMediaSession(playerTime());
+}
+
+function seekTo(seconds: number): void {
+  const { duration } = playerTime();
+  seekAll(Math.max(0, Math.min(duration, seconds)));
+  updateMediaSession(playerTime(), true);
+}
+
+const SEEK_STEP_SECONDS = 5;
+
+/**
+ * Project-page shortcuts: Space plays or pauses, ←/→ seek 5 s, Home returns
+ * to the start, and M/S mute or solo the focused stem row. Keys typed into a
+ * form field, or used on a focused button or menu, keep their usual meaning.
+ */
+async function handleKeyDown(event: KeyboardEvent): Promise<void> {
+  const project = state.selectedProject;
+  if (!project?.completedStems.length) return;
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  const target = event.target as HTMLElement;
+  if (target.closest("input, select, textarea, [contenteditable]")) return;
+  if (!playerTime().ready) return;
+  const row = target.closest<HTMLElement>("[data-stem-row]");
+  const onButton = target.closest("button") !== null;
+  switch (event.key) {
+    case " ":
+      if (onButton) return;
+      event.preventDefault();
+      await togglePlay(!isPlaying());
+      break;
+    case "ArrowLeft":
+    case "ArrowRight":
+      event.preventDefault();
+      seekTo(
+        playerTime().position +
+          (event.key === "ArrowLeft" ? -SEEK_STEP_SECONDS : SEEK_STEP_SECONDS),
+      );
+      break;
+    case "Home":
+      event.preventDefault();
+      seekTo(0);
+      break;
+    case "m":
+    case "M":
+    case "s":
+    case "S": {
+      if (!row) return;
+      event.preventDefault();
+      const stem = row.dataset.stemRow as Stem;
+      if (event.key.toLowerCase() === "m") await toggleMute(project, stem);
+      else await toggleSolo(project, stem);
+      // The re-render replaced the row; keep the focus on it.
+      document.querySelector<HTMLElement>(`[data-stem-row="${stem}"]`)
+        ?.focus();
+      break;
+    }
   }
 }
 
@@ -251,12 +342,18 @@ async function handleFileChange(event: Event): Promise<void> {
 }
 
 async function toggleMute(project: Project, stem: Stem): Promise<void> {
-  const muted = project.mutedStems.includes(stem);
-  const nextMuted = muted
-    ? project.mutedStems.filter((item) => item !== stem)
-    : [...project.mutedStems, stem];
-  const updated = { ...project, mutedStems: nextMuted };
-  applyStemVolume(updated, stem);
+  await saveMix({ ...project, mutedStems: toggleStem(project.mutedStems, stem) });
+}
+
+async function toggleSolo(project: Project, stem: Stem): Promise<void> {
+  await saveMix({ ...project, soloStems: toggleStem(soloStems(project), stem) });
+}
+
+/** Applies a changed mute/solo state to every stem, saves it and re-renders. */
+async function saveMix(updated: Project): Promise<void> {
+  // Set at once, so a quick next key press builds on this change.
+  state.selectedProject = updated;
+  for (const stem of updated.completedStems) applyStemVolume(updated, stem);
   state.selectedProject = await saveProject(updated);
   await render();
 }
@@ -313,6 +410,9 @@ root.addEventListener("click", (event) => {
   void handleClick(event).catch(showError);
 });
 root.addEventListener("input", handleInput);
+document.addEventListener("keydown", (event) => {
+  void handleKeyDown(event).catch(showError);
+});
 root.addEventListener("change", (event) => {
   void handleChange(event).catch(showError);
 });

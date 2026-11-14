@@ -21,6 +21,8 @@ export interface Project {
   completedStems: Stem[];
   volumes: Record<Stem, number>;
   mutedStems: Stem[];
+  /** Soloed stems. Missing on projects saved before solo existed. */
+  soloStems?: Stem[];
   errorMessage: string | null;
 }
 
@@ -59,6 +61,7 @@ export function newProject(name: string): Project {
     completedStems: [],
     volumes: { vocals: 1, piano: 1, drums: 1, bass: 1, other: 1 },
     mutedStems: [],
+    soloStems: [],
     errorMessage: null,
   };
 }
