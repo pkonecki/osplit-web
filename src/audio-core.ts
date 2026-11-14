@@ -31,6 +31,25 @@ export function resampleStereo(
   return stereo;
 }
 
+/**
+ * Interleaves two channels already at SAMPLE_RATE into one stereo buffer. Same
+ * result as resampleStereo at equal rates (x + (y - x) * 0 is exactly x), with
+ * no intermediate copies.
+ */
+export function interleaveStereo(
+  left: Float32Array,
+  right: Float32Array,
+): Float32Array {
+  const frames = Math.min(left.length, right.length);
+  if (frames === 0) throw new Error("The audio source has no decodable samples.");
+  const stereo = new Float32Array(frames * CHANNELS);
+  for (let frame = 0; frame < frames; frame++) {
+    stereo[frame * 2] = left[frame];
+    stereo[frame * 2 + 1] = right[frame];
+  }
+  return stereo;
+}
+
 export function makeHannWindow(): Float32Array {
   const window = new Float32Array(FRAME_LENGTH);
   for (let i = 0; i < FRAME_LENGTH; i++) {
@@ -96,14 +115,16 @@ export function fftInPlace(real: Float32Array, imaginary: Float32Array, inverse:
   }
 }
 
-export function encodeWav(samples: Float32Array, frameCount: number): Blob {
-  if (samples.length !== frameCount * CHANNELS) {
-    throw new Error("Stereo sample count does not match the frame count.");
-  }
-  const bytes = new ArrayBuffer(WAV_HEADER_BYTES + samples.length * 2);
-  const view = new DataView(bytes);
+/** Size of a 16-bit stereo 44.1 kHz WAV file of `frameCount` frames. */
+export function wavByteLength(frameCount: number): number {
+  return WAV_HEADER_BYTES + frameCount * CHANNELS * 2;
+}
+
+/** Writes the 44-byte header of a 16-bit stereo 44.1 kHz PCM WAV file. */
+export function writeWavHeader(view: DataView, frameCount: number): void {
+  const dataBytes = frameCount * CHANNELS * 2;
   writeText(view, 0, "RIFF");
-  view.setUint32(4, bytes.byteLength - 8, true);
+  view.setUint32(4, WAV_HEADER_BYTES + dataBytes - 8, true);
   writeText(view, 8, "WAVE");
   writeText(view, 12, "fmt ");
   view.setUint32(16, 16, true);
@@ -114,14 +135,24 @@ export function encodeWav(samples: Float32Array, frameCount: number): Blob {
   view.setUint16(32, CHANNELS * 2, true);
   view.setUint16(34, 16, true);
   writeText(view, 36, "data");
-  view.setUint32(40, samples.length * 2, true);
+  view.setUint32(40, dataBytes, true);
+}
+
+/** Converts a float sample to 16-bit PCM, clamping to the full-scale range. */
+export function toPcm16(sample: number): number {
+  const value = Math.max(-1, Math.min(1, sample));
+  return Math.round(value * (value < 0 ? 32768 : 32767));
+}
+
+export function encodeWav(samples: Float32Array, frameCount: number): Blob {
+  if (samples.length !== frameCount * CHANNELS) {
+    throw new Error("Stereo sample count does not match the frame count.");
+  }
+  const bytes = new ArrayBuffer(wavByteLength(frameCount));
+  const view = new DataView(bytes);
+  writeWavHeader(view, frameCount);
   for (let i = 0; i < samples.length; i++) {
-    const value = Math.max(-1, Math.min(1, samples[i]));
-    view.setInt16(
-      WAV_HEADER_BYTES + i * 2,
-      Math.round(value * (value < 0 ? 32768 : 32767)),
-      true,
-    );
+    view.setInt16(WAV_HEADER_BYTES + i * 2, toPcm16(samples[i]), true);
   }
   return new Blob([bytes], { type: "audio/wav" });
 }

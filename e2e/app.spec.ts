@@ -217,6 +217,25 @@ test("separates a clip and mixes the stems", async ({ page }) => {
   expect((await download).suggestedFilename()).toBe("E2E clip-vocals.wav");
 });
 
+test("warns about a long track on a low-memory device", async ({ page, context }) => {
+  // Pretend to be a device with 256 MB of memory: even the short test clip
+  // is then too long for it.
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "deviceMemory", { get: () => 0.25 });
+  });
+  await openApp(page);
+  await createProjectWithClip(page, "Low memory", clip);
+  await page.click('[data-action="separate"]');
+  await expect(page.locator(".message span").first()).toHaveText(
+    /This track is long for this device/,
+  );
+  // The warning goes away once the separation succeeds.
+  await expect(page.locator('[data-action="export-mix"]')).toBeVisible({
+    timeout: SEPARATION_TIMEOUT,
+  });
+  await expect(page.getByText("This track is long for this device")).toHaveCount(0);
+});
+
 test("rejects a tampered model and caches nothing", async ({ page, context }) => {
   await context.route("**/models/fp16/vocals.fp16.onnx", async (route) => {
     const response = await route.fetch();

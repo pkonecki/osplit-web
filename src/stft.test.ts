@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { CHANNELS, SAMPLES_PER_SEGMENT, SAMPLE_RATE } from "./audio-core";
+import {
+  CHANNELS,
+  SAMPLE_RATE,
+  SAMPLES_PER_SEGMENT,
+  toPcm16,
+} from "./audio-core";
 import {
   LOGIT_SCALE,
   logitsToMasks,
   OverlapAddSynthesizer,
   planStft,
+  type StemOutput,
   SegmentAnalyzer,
   segmentFrames,
 } from "./stft";
@@ -113,6 +119,41 @@ describe("STFT analysis and synthesis", () => {
     const [kept] = roundTrip(high, 1, (masks) => masks.fill(1));
     const peak = high.reduce((max, value) => Math.max(max, Math.abs(value)), 0);
     expect(maxError(kept, new Float32Array(kept.length))).toBeLessThan(peak * 0.01);
+  });
+});
+
+describe("16-bit output", () => {
+  it("writes exactly the PCM that encoding the float output would", () => {
+    const samples = testSignal(SAMPLE_RATE * 13);
+    const plan = planStft(samples.length / CHANNELS);
+    const run = (outputs: StemOutput[]) => {
+      const analyzer = new SegmentAnalyzer(samples, plan);
+      const synthesizer = new OverlapAddSynthesizer(plan, outputs);
+      const masks = new Float32Array(3 * STRIDE);
+      for (let segment = 0; segment < plan.segmentCount; segment++) {
+        analyzer.analyze(segment);
+        for (let i = 0; i < masks.length; i++) masks[i] = Math.cos(i * 0.11);
+        logitsToMasks(masks, 3, segmentFrames(plan, segment));
+        synthesizer.synthesize(segment, analyzer.spectra, masks);
+      }
+      return outputs;
+    };
+    const floats = run([0, 1, 2].map(() => new Float32Array(samples.length)));
+    const pcm = run([0, 1, 2].map(() => new Int16Array(samples.length)));
+    let mismatches = 0;
+    for (let stem = 0; stem < 3; stem++) {
+      for (let i = 0; i < samples.length; i++) {
+        if (pcm[stem][i] !== toPcm16(floats[stem][i])) mismatches++;
+      }
+    }
+    expect(mismatches).toBe(0);
+  }, 60_000);
+
+  it("rejects a mix of float and 16-bit outputs", () => {
+    const plan = planStft(1000);
+    expect(() =>
+      new OverlapAddSynthesizer(plan, [new Float32Array(2000), new Int16Array(2000)])
+    ).toThrow(/same sample type/);
   });
 });
 

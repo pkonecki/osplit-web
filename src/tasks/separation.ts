@@ -1,6 +1,16 @@
-import { resampleStereo } from "../audio-core";
+import {
+  CHANNELS,
+  interleaveStereo,
+  resampleStereo,
+  SAMPLE_RATE,
+} from "../audio-core";
+import {
+  estimateSeparationBytes,
+  isLongForDevice,
+  LONG_TRACK_WARNING,
+} from "../memory";
 import type { InferenceRequest, InferenceResponse } from "../messages";
-import { requestRender, state } from "../state";
+import { requestRender, showMessage, state } from "../state";
 import { completeSeparation, getSource, updateProjectTask } from "../storage";
 import type { Project, Stem } from "../types";
 import { updateProgressDisplay } from "../view/detail";
@@ -37,23 +47,19 @@ export async function separateProject(project: Project): Promise<void> {
       taskStage: "Preparing audio",
     });
     await requestRender();
-    const audioContext = new AudioContext({ sampleRate: 44_100 });
-    let decoded: AudioBuffer;
-    try {
-      decoded = await audioContext.decodeAudioData(
-        await source.blob.arrayBuffer(),
-      );
-    } finally {
-      await audioContext.close();
-    }
+    const samples = await decodeToStereo(source.blob);
     if (abortSeparation) {
       throw new DOMException("Separation cancelled.", "AbortError");
     }
-    const left = decoded.getChannelData(0).slice();
-    const right = decoded.numberOfChannels > 1
-      ? decoded.getChannelData(1).slice()
-      : left.slice();
-    const samples = resampleStereo(left, right, decoded.sampleRate);
+    const frameCount = samples.length / CHANNELS;
+    if (
+      isLongForDevice(
+        estimateSeparationBytes(frameCount, project.quality),
+        (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
+      )
+    ) {
+      showMessage(LONG_TRACK_WARNING);
+    }
     const id = crypto.randomUUID();
     const worker = new Worker(
       new URL("../inference.worker.ts", import.meta.url),
@@ -100,6 +106,7 @@ export async function separateProject(project: Project): Promise<void> {
     await persist.settled();
     state.selectedProject = await completeSeparation(project.id, stems);
     state.progressLabel = "Separation complete";
+    if (state.screenMessage === LONG_TRACK_WARNING) state.screenMessage = "";
   } catch (error) {
     const cancelled = error instanceof DOMException &&
       error.name === "AbortError";
@@ -121,6 +128,26 @@ export async function separateProject(project: Project): Promise<void> {
     releaseWakeLock();
     await requestRender();
   }
+}
+
+/**
+ * Decodes the source file to interleaved stereo at 44.1 kHz. The decoded
+ * buffer and the file's bytes stay local to this function, so they can be
+ * freed while the separation runs.
+ */
+async function decodeToStereo(file: Blob): Promise<Float32Array> {
+  const audioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
+  let decoded: AudioBuffer;
+  try {
+    decoded = await audioContext.decodeAudioData(await file.arrayBuffer());
+  } finally {
+    await audioContext.close();
+  }
+  const left = decoded.getChannelData(0);
+  const right = decoded.numberOfChannels > 1 ? decoded.getChannelData(1) : left;
+  return decoded.sampleRate === SAMPLE_RATE
+    ? interleaveStereo(left, right)
+    : resampleStereo(left, right, decoded.sampleRate);
 }
 
 export function cancelSeparation(): void {
