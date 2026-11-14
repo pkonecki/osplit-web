@@ -1,14 +1,22 @@
+import { exportFormat } from "../export";
 import { playerTime } from "../player";
 import { type Project, STEM_LABELS, STEMS } from "../types";
 import { formatTime } from "./format";
 
 export function renderMixer(project: Project): string {
   const time = playerTime();
+  const format = exportFormat();
   return `
     <section class="mixer-card">
       <div class="mixer-title">
         <h2>Project player &amp; mixer</h2>
-        <button class="button outline" data-action="export-mix">Export full mix</button>
+        <div class="export-actions">
+          <select class="export-format" data-action="export-format" aria-label="Export format">
+            <option value="flac" ${format === "flac" ? "selected" : ""}>FLAC · smaller, lossless</option>
+            <option value="wav" ${format === "wav" ? "selected" : ""}>WAV · most compatible</option>
+          </select>
+          <button class="button outline" data-action="export-mix">Export full mix</button>
+        </div>
       </div>
       <div class="player-row">
         <button class="play-button" data-action="play" aria-label="${

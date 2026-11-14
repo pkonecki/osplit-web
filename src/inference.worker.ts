@@ -6,10 +6,8 @@ import {
   FREQUENCY_BINS,
   SAMPLES_PER_SEGMENT,
   SEGMENT_FRAMES,
-  WAV_HEADER_BYTES,
-  wavByteLength,
-  writeWavHeader,
 } from "./audio-core";
+import { FlacEncoder } from "./flac";
 import {
   logitsToMasks,
   OverlapAddSynthesizer,
@@ -188,7 +186,7 @@ async function runSeparation(
     throw new Error("The decoded source has no valid stereo samples.");
   }
   const frameCount = interleavedSamples.length / CHANNELS;
-  const wavFiles: (ArrayBuffer | undefined)[] = await synthesizeWavFiles(
+  const encoders = await separateIntoFlac(
     interleavedSamples,
     frameCount,
     sessions,
@@ -196,35 +194,33 @@ async function runSeparation(
     quality,
   );
   checkCancelled(id);
-  // Blob creation copies the data: convert one stem at a time and drop its
-  // buffer right away, so only one extra copy exists at once.
+  // finish() copies each stem's frames into its Blob: one stem at a time, so
+  // only one extra copy exists at once.
   const stems = {} as Record<Stem, Blob>;
   STEMS.forEach((stem, index) => {
-    stems[stem] = new Blob([wavFiles[index]!], { type: "audio/wav" });
-    wavFiles[index] = undefined;
+    stems[stem] = encoders[index].finish();
   });
   return stems;
 }
 
 /**
- * Runs the models over the input and writes each stem straight into a 16-bit
- * WAV file buffer as samples become final, with no float copy of the output.
+ * Runs the models over the input and encodes each stem to FLAC as its samples
+ * become final, so no full-length copy of the output is kept.
  */
-async function synthesizeWavFiles(
+async function separateIntoFlac(
   interleavedSamples: Float32Array,
   frameCount: number,
   sessions: Partial<Record<Stem, ort.InferenceSession>>,
   id: string,
   quality: Quality,
-): Promise<ArrayBuffer[]> {
+): Promise<FlacEncoder[]> {
   const plan = planStft(frameCount);
-  const wavFiles = STEMS.map(() => new ArrayBuffer(wavByteLength(frameCount)));
-  for (const file of wavFiles) writeWavHeader(new DataView(file), frameCount);
-  const outputs = wavFiles.map((file) =>
-    new Int16Array(file, WAV_HEADER_BYTES, frameCount * CHANNELS)
-  );
+  const encoders = STEMS.map(() => new FlacEncoder());
+  const synthesizer = new OverlapAddSynthesizer(plan, {
+    sourceCount: STEMS.length,
+    onSamples: (source, pcm) => encoders[source].push(pcm),
+  });
   const analyzer = new SegmentAnalyzer(interleavedSamples, plan);
-  const synthesizer = new OverlapAddSynthesizer(plan, outputs);
   const logits = new Float32Array(
     STEMS.length * CHANNELS * SAMPLES_PER_SEGMENT,
   );
@@ -266,7 +262,7 @@ async function synthesizeWavFiles(
     );
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }
-  return wavFiles;
+  return encoders;
 }
 
 let lastDownloadReport = "";

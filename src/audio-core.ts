@@ -157,35 +157,84 @@ export function encodeWav(samples: Float32Array, frameCount: number): Blob {
   return new Blob([bytes], { type: "audio/wav" });
 }
 
-export function mixWavBlobs(blobs: Blob[], gains: number[]): Promise<Blob> {
-  if (blobs.length === 0 || blobs.length !== gains.length) {
-    return Promise.reject(new Error("No usable stems are selected for the mix."));
+/** Decoded stereo audio at SAMPLE_RATE, samples in −1…1. */
+export interface StereoChannels {
+  left: Float32Array;
+  right: Float32Array;
+}
+
+/**
+ * Converts a sample decoded from 16-bit audio back to 16-bit. Browsers decode
+ * 16-bit PCM as sample / 32768, so this is exact; toPcm16, which scales
+ * positive values by 32767, would not be.
+ */
+export function fromDecodedPcm16(sample: number): number {
+  return Math.max(-32768, Math.min(32767, Math.round(sample * 32768)));
+}
+
+/** Reads a 16-bit stereo 44.1 kHz WAV file into channels, as browsers decode it. */
+export function wavToStereo(buffer: ArrayBuffer): StereoChannels {
+  const view = new DataView(buffer);
+  const frames = readWavFrames(view);
+  const left = new Float32Array(frames);
+  const right = new Float32Array(frames);
+  for (let frame = 0; frame < frames; frame++) {
+    const offset = WAV_HEADER_BYTES + frame * 4;
+    left[frame] = view.getInt16(offset, true) / 32768;
+    right[frame] = view.getInt16(offset + 2, true) / 32768;
   }
-  return Promise.all(blobs.map((blob) => blob.arrayBuffer())).then((buffers) => {
-    const views = buffers.map((buffer) => new DataView(buffer));
-    const frames = views.map((view) => readWavFrames(view));
-    if (frames.some((count) => count !== frames[0])) {
-      throw new Error("The project stems have different lengths.");
+  return { left, right };
+}
+
+/** Interleaved 16-bit PCM of decoded 16-bit stereo audio (exact). */
+export function stereoToPcm16(stereo: StereoChannels): Int16Array {
+  const frames = stereo.left.length;
+  const pcm = new Int16Array(frames * CHANNELS);
+  for (let frame = 0; frame < frames; frame++) {
+    pcm[frame * 2] = fromDecodedPcm16(stereo.left[frame]);
+    pcm[frame * 2 + 1] = fromDecodedPcm16(stereo.right[frame]);
+  }
+  return pcm;
+}
+
+/** A 16-bit stereo 44.1 kHz WAV file of interleaved 16-bit samples. */
+export function encodeWavPcm16(interleaved: Int16Array): Blob {
+  const frames = interleaved.length / CHANNELS;
+  const bytes = new ArrayBuffer(wavByteLength(frames));
+  writeWavHeader(new DataView(bytes), frames);
+  new Int16Array(bytes, WAV_HEADER_BYTES, interleaved.length).set(interleaved);
+  return new Blob([bytes], { type: "audio/wav" });
+}
+
+/**
+ * Mixes stems with per-stem gains into interleaved float samples, scaling
+ * the result down only if it would clip.
+ */
+export function mixStems(stems: StereoChannels[], gains: number[]): Float32Array {
+  if (stems.length === 0 || stems.length !== gains.length) {
+    throw new Error("No usable stems are selected for the mix.");
+  }
+  const frameCount = stems[0].left.length;
+  if (stems.some((stem) => stem.left.length !== frameCount || stem.right.length !== frameCount)) {
+    throw new Error("The project stems have different lengths.");
+  }
+  const output = new Float32Array(frameCount * CHANNELS);
+  let peak = 0;
+  for (let frame = 0; frame < frameCount; frame++) {
+    let left = 0;
+    let right = 0;
+    for (let index = 0; index < stems.length; index++) {
+      left += stems[index].left[frame] * gains[index];
+      right += stems[index].right[frame] * gains[index];
     }
-    const frameCount = frames[0];
-    const output = new Float32Array(frameCount * CHANNELS);
-    let peak = 0;
-    for (let frame = 0; frame < frameCount; frame++) {
-      for (let channel = 0; channel < CHANNELS; channel++) {
-        let value = 0;
-        views.forEach((view, stemIndex) => {
-          value += view.getInt16(WAV_HEADER_BYTES + (frame * CHANNELS + channel) * 2, true) /
-            32768 * gains[stemIndex];
-        });
-        output[frame * CHANNELS + channel] = value;
-        peak = Math.max(peak, Math.abs(value));
-      }
-    }
-    if (peak > 1) {
-      for (let i = 0; i < output.length; i++) output[i] /= peak;
-    }
-    return encodeWav(output, frameCount);
-  });
+    output[frame * CHANNELS] = left;
+    output[frame * CHANNELS + 1] = right;
+    peak = Math.max(peak, Math.abs(left), Math.abs(right));
+  }
+  if (peak > 1) {
+    for (let i = 0; i < output.length; i++) output[i] /= peak;
+  }
+  return output;
 }
 
 export function readWavFrames(view: DataView): number {

@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   encodeWav,
   fftInPlace,
-  mixWavBlobs,
+  mixStems,
   readWavFrames,
+  wavToStereo,
   resampleStereo,
 } from "./audio-core";
 
@@ -40,20 +41,35 @@ describe("audio primitives", () => {
     expect(view.getInt16(46, true)).toBe(-8192);
   });
 
+  // Mixing works on decoded stems (as browsers decode them); the expected
+  // samples are those the WAV-only mix produced before FLAC stems.
+  async function mixWav(stems: Blob[], gains: number[]) {
+    const decoded = await Promise.all(
+      stems.map(async (stem) => wavToStereo(await stem.arrayBuffer())),
+    );
+    const mixed = mixStems(decoded, gains);
+    return new DataView(await encodeWav(mixed, mixed.length / 2).arrayBuffer());
+  }
+
   it("mixes enabled stems and normalizes only when their peak would clip", async () => {
     const first = encodeWav(new Float32Array([0.75, -0.75]), 1);
     const second = encodeWav(new Float32Array([0.75, -0.75]), 1);
-    const result = await mixWavBlobs([first, second], [1, 1]);
-    const view = new DataView(await result.arrayBuffer());
+    const view = await mixWav([first, second], [1, 1]);
     expect(view.getInt16(44, true)).toBe(32766);
     expect(view.getInt16(46, true)).toBe(-32768);
   });
 
   it("preserves the level of mixes below full scale", async () => {
     const input = encodeWav(new Float32Array([0.2, -0.2]), 1);
-    const result = await mixWavBlobs([input], [1]);
-    const view = new DataView(await result.arrayBuffer());
+    const view = await mixWav([input], [1]);
     expect(view.getInt16(44, true)).toBe(6553);
+  });
+
+  it("refuses stems of different lengths", () => {
+    const short = { left: new Float32Array(2), right: new Float32Array(2) };
+    const long = { left: new Float32Array(3), right: new Float32Array(3) };
+    expect(() => mixStems([short, long], [1, 1])).toThrow(/different lengths/);
+    expect(() => mixStems([], [])).toThrow(/No usable stems/);
   });
 });
 
@@ -77,5 +93,24 @@ describe("interleaveStereo", () => {
     expect(interleaveStereo(left, right)).toEqual(resampleStereo(left, right, 44_100));
     expect(() => interleaveStereo(new Float32Array(0), new Float32Array(0)))
       .toThrow(/no decodable samples/);
+  });
+});
+
+describe("decoded 16-bit conversion", () => {
+  it("restores every 16-bit value exactly from its decoded float", async () => {
+    const { fromDecodedPcm16 } = await import("./audio-core");
+    let mismatches = 0;
+    for (let value = -32768; value <= 32767; value++) {
+      if (fromDecodedPcm16(Math.fround(value / 32768)) !== value) mismatches++;
+    }
+    expect(mismatches).toBe(0);
+  });
+
+  it("round-trips WAV through decoding and back exactly", async () => {
+    const { encodeWavPcm16, stereoToPcm16 } = await import("./audio-core");
+    const pcm = Int16Array.from({ length: 2000 }, (_, i) =>
+      ((i * 7919) % 65536) - 32768);
+    const wav = encodeWavPcm16(pcm);
+    expect(stereoToPcm16(wavToStereo(await wav.arrayBuffer()))).toEqual(pcm);
   });
 });

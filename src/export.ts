@@ -1,12 +1,59 @@
-import { mixWavBlobs } from "./audio-core";
+import {
+  CHANNELS,
+  encodeWav,
+  encodeWavPcm16,
+  mixStems,
+  readWavFrames,
+  stereoToPcm16,
+  toPcm16,
+  WAV_HEADER_BYTES,
+} from "./audio-core";
+import { decodeStem } from "./audio-decode";
+import { type AudioFormat, detectAudioFormat } from "./audio-format";
+import { encodeFlac } from "./flac";
 import { getStem } from "./storage";
 import { type Project, type Stem, STEM_LABELS, STEMS } from "./types";
 import { safeFileName } from "./view/format";
 
+const EXPORT_FORMAT_KEY = "osplit-export-format";
+
+/** The export format chosen in this browser; FLAC unless WAV was picked. */
+export function exportFormat(): AudioFormat {
+  try {
+    return localStorage.getItem(EXPORT_FORMAT_KEY) === "wav" ? "wav" : "flac";
+  } catch {
+    return "flac";
+  }
+}
+
+export function setExportFormat(format: AudioFormat): void {
+  try {
+    localStorage.setItem(EXPORT_FORMAT_KEY, format);
+  } catch {
+    // Not remembered without storage; the choice still applies to this page.
+  }
+}
+
+/** A stored stem in the requested format, converted losslessly if needed. */
+export async function stemFile(blob: Blob, format: AudioFormat): Promise<Blob> {
+  const stored = await detectAudioFormat(blob);
+  if (stored === format) return blob;
+  if (format === "flac") {
+    const bytes = await blob.arrayBuffer();
+    const frames = readWavFrames(new DataView(bytes));
+    return encodeFlac(new Int16Array(bytes, WAV_HEADER_BYTES, frames * CHANNELS));
+  }
+  return encodeWavPcm16(stereoToPcm16(await decodeStem(blob)));
+}
+
 export async function exportStem(project: Project, stem: Stem): Promise<void> {
   const stored = await getStem(project.id, stem);
   if (!stored) throw new Error(`The ${STEM_LABELS[stem]} stem is missing.`);
-  downloadBlob(stored.blob, `${safeFileName(project.name)}-${stem}.wav`);
+  const format = exportFormat();
+  downloadBlob(
+    await stemFile(stored.blob, format),
+    `${safeFileName(project.name)}-${stem}.${format}`,
+  );
 }
 
 export async function exportMix(project: Project): Promise<void> {
@@ -21,11 +68,15 @@ export async function exportMix(project: Project): Promise<void> {
   if (records.some((record) => !record)) {
     throw new Error("One or more project stem files are missing.");
   }
-  const blob = await mixWavBlobs(
-    records.map((record) => record!.blob),
-    active.map((stem) => project.volumes[stem]),
+  const decoded = await Promise.all(
+    records.map((record) => decodeStem(record!.blob)),
   );
-  downloadBlob(blob, `${safeFileName(project.name)}-mix.wav`);
+  const mixed = mixStems(decoded, active.map((stem) => project.volumes[stem]));
+  const format = exportFormat();
+  const file = format === "wav"
+    ? encodeWav(mixed, mixed.length / CHANNELS)
+    : encodeFlac(Int16Array.from(mixed, toPcm16));
+  downloadBlob(file, `${safeFileName(project.name)}-mix.${format}`);
 }
 
 export function downloadBlob(blob: Blob, name: string): void {

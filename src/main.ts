@@ -1,5 +1,5 @@
 import "./style.css";
-import { exportMix, exportStem } from "./export";
+import { exportMix, exportStem, setExportFormat } from "./export";
 import { enableIsolationReload } from "./isolation";
 import { appUrl } from "./paths";
 import {
@@ -279,6 +279,10 @@ function handleInput(event: Event): void {
 
 async function handleChange(event: Event): Promise<void> {
   const target = event.target as HTMLInputElement;
+  if (target.dataset.action === "export-format") {
+    setExportFormat(target.value === "wav" ? "wav" : "flac");
+    return;
+  }
   if (target.type === "range" && target.id === "seek-bar") {
     seekAll(Number(target.value));
   }

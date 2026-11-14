@@ -3,11 +3,12 @@
   "specifiers": {
     "npm:@playwright/test@1.63.0": "1.63.0",
     "npm:@project516/yt-dlp-wasm@0.6": "0.6.0",
+    "npm:@types/node@26.6.6": "26.6.6",
     "npm:fake-indexeddb@^6.2.8": "6.2.8",
     "npm:onnxruntime-web@^1.31.1": "1.31.1",
     "npm:typescript@~7.0.2": "7.0.2",
-    "npm:vite@^8.3.5": "8.3.5",
-    "npm:vitest@^5.0.5": "5.0.5_vite@8.3.5"
+    "npm:vite@^8.3.5": "8.3.5_@types+node@26.6.6",
+    "npm:vitest@^5.0.5": "5.0.5_@types+node@26.6.6_vite@8.3.5__@types+node@26.6.6"
   },
   "npm": {
     "@jridgewell/resolve-uri@3.1.2": {
@@ -274,7 +275,7 @@
       "os": ["win32"],
       "cpu": ["x64"]
     },
-    "@vitest/mocker@5.0.5_vite@8.3.5": {
+    "@vitest/mocker@5.0.5_vite@8.3.5__@types+node@26.6.6_@types+node@26.6.6": {
       "integrity": "sha512-xLL3lkDegJZw+MGoGaCCsFayDZthGgpAtr3Vziyfc4p7xH89K7KRPcRBBh/kEYm0Aqkt5DtTmkYpBtRV/FrHZg==",
       "dependencies": [
         "@jridgewell/trace-mapping",
@@ -563,9 +564,10 @@
     "undici-types@8.9.0": {
       "integrity": "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="
     },
-    "vite@8.3.5": {
+    "vite@8.3.5_@types+node@26.6.6": {
       "integrity": "sha512-z1YpjieJ9g0ebTmQpLBv/oq9E3F9EIlOe+7LahW8SrE3LTiG3udBRUXQOlYXP9b+IC2q2phHeVxj9xGlw34OEQ==",
       "dependencies": [
+        "@types/node",
         "lightningcss",
         "picomatch",
         "postcss",
@@ -575,12 +577,16 @@
       "optionalDependencies": [
         "fsevents"
       ],
+      "optionalPeers": [
+        "@types/node"
+      ],
       "bin": true
     },
-    "vitest@5.0.5_vite@8.3.5": {
+    "vitest@5.0.5_@types+node@26.6.6_vite@8.3.5__@types+node@26.6.6": {
       "integrity": "sha512-cPODOMF8YnkiiYtDdHo6n4wWmBrOBBbOIYH2d33M4l3CdNn72h+qMmO6uXffUN6A5AZFXNND/d+krS9mgkXRfg==",
       "dependencies": [
         "@types/chai",
+        "@types/node",
         "@vitest/mocker",
         "chai",
         "es-module-lexer",
@@ -594,6 +600,9 @@
         "tinyglobby",
         "vite",
         "why-is-node-running"
+      ],
+      "optionalPeers": [
+        "@types/node"
       ],
       "bin": true
     },
@@ -610,6 +619,7 @@
       "dependencies": [
         "npm:@playwright/test@1.63.0",
         "npm:@project516/yt-dlp-wasm@0.6",
+        "npm:@types/node@26.6.6",
         "npm:fake-indexeddb@^6.2.8",
         "npm:onnxruntime-web@^1.31.1",
         "npm:typescript@~7.0.2",
