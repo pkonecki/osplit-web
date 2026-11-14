@@ -37,6 +37,7 @@ declare global {
     __gains: GainNode[];
     __audios: HTMLAudioElement[];
     __progress: { value: number; label: string }[];
+    __starts: { when: number; offset: number }[];
   }
 }
 
@@ -54,6 +55,18 @@ export function instrument(): void {
     const gain = createGain.call(this);
     window.__gains.push(gain);
     return gain;
+  };
+  window.__starts = [];
+  const start = AudioBufferSourceNode.prototype.start;
+  AudioBufferSourceNode.prototype.start = function (
+    when?: number,
+    offset?: number,
+    duration?: number,
+  ) {
+    window.__starts.push({ when: when ?? 0, offset: offset ?? 0 });
+    return duration === undefined
+      ? start.call(this, when, offset)
+      : start.call(this, when, offset, duration);
   };
   window.__audios = [];
   const NativeAudio = window.Audio;
@@ -141,3 +154,24 @@ export function readStore<T = unknown>(
 }
 
 export const SEPARATION_TIMEOUT = 3 * 60 * 1000;
+
+/** Creates a project from the clip and separates it. */
+export async function separateClip(
+  page: Page,
+  name: string,
+  clip: string,
+): Promise<void> {
+  await createProjectWithClip(page, name, clip);
+  await page.click('[data-action="separate"]');
+  await expect(page.locator('[data-action="export-mix"]')).toBeVisible({
+    timeout: SEPARATION_TIMEOUT,
+  });
+}
+
+/** Moves the seek bar as a user would. */
+export async function seekTo(page: Page, seconds: number): Promise<void> {
+  await page.locator("#seek-bar").evaluate((input: HTMLInputElement, value) => {
+    input.value = String(value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }, seconds);
+}

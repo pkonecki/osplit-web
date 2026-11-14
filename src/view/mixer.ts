@@ -20,10 +20,10 @@ export function renderMixer(project: Project): string {
       </div>
       <div class="player-row">
         <button class="play-button" data-action="play" aria-label="${
-    time.playing ? "Pause" : "Play"
-  }">${time.playing ? "Ⅱ" : "▶"}</button>
+    playLabel(time)
+  }" ${time.ready ? "" : "disabled"}>${playGlyph(time)}</button>
         <div class="seek-area">
-          <input id="seek-bar" type="range" min="0" max="${time.duration}" value="${time.position}" ${
+          <input id="seek-bar" type="range" min="0" step="any" max="${time.duration}" value="${time.position}" ${
     time.duration ? "" : "disabled"
   } aria-label="Seek" />
           <div class="time-row"><span id="current-time">${
@@ -68,10 +68,22 @@ export function updatePlayerDisplay(): void {
   );
   if (!range || !current || !total || !play) return;
   const time = playerTime();
-  if (document.activeElement !== range) range.value = String(time.position);
   range.max = String(time.duration);
+  if (document.activeElement !== range) range.value = String(time.position);
+  range.disabled = !time.duration;
   current.textContent = formatTime(time.position);
   total.textContent = formatTime(time.duration);
-  play.textContent = time.playing ? "Ⅱ" : "▶";
-  play.setAttribute("aria-label", time.playing ? "Pause" : "Play");
+  play.textContent = playGlyph(time);
+  play.setAttribute("aria-label", playLabel(time));
+  play.disabled = !time.ready;
+}
+
+function playGlyph(time: ReturnType<typeof playerTime>): string {
+  if (!time.ready) return "…";
+  return time.playing ? "Ⅱ" : "▶";
+}
+
+function playLabel(time: ReturnType<typeof playerTime>): string {
+  if (!time.ready) return "Loading stems";
+  return time.playing ? "Pause" : "Play";
 }

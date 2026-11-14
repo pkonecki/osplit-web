@@ -6,6 +6,8 @@ import {
   openApp,
   readStore,
   recordProgress,
+  seekTo,
+  separateClip,
   SEPARATION_TIMEOUT,
   writeTestClip,
 } from "./helpers";
@@ -211,11 +213,13 @@ test("separates a clip and mixes the stems", async ({ page }) => {
   expect(modelKeys.filter((key) => /^fp16\/\w+\.fp16\.onnx@[0-9a-f]{64}$/.test(key)))
     .toHaveLength(5);
 
-  // Mixer: levels go through the gain nodes only; mute and unmute.
+  // Mixer: the stems play from decoded buffers, started together, with one
+  // gain node each; mute and unmute.
   await page.click('[data-action="play"]');
   await expect.poll(() => page.evaluate(() => window.__gains.length)).toBe(5);
-  expect(await page.evaluate(() => window.__audios.filter((a) => a.src).map((a) => a.volume)))
-    .toEqual([1, 1, 1, 1, 1]);
+  const starts = await page.evaluate(() => window.__starts);
+  expect(starts).toHaveLength(5);
+  expect(new Set(starts.map((start) => `${start.when}@${start.offset}`)).size).toBe(1);
   const slider = page.locator('[data-action="volume"][data-stem="vocals"]');
   await slider.scrollIntoViewIfNeeded();
   const box = (await slider.boundingBox())!;
@@ -259,6 +263,68 @@ test("separates a clip and mixes the stems", async ({ page }) => {
   const mix = await mixDownload;
   expect(mix.suggestedFilename()).toBe("E2E clip-mix.wav");
   expect(readFileSync(await mix.path()).length).toBe(44 + 44_100 * 3 * 4);
+});
+
+test("plays the stems sample-aligned through seeks and pauses", async ({ page }) => {
+  await openApp(page);
+  await separateClip(page, "Sync", clip);
+  await page.click('[data-action="play"]');
+  // The position follows the audio clock while playing.
+  const seekBar = page.locator("#seek-bar");
+  await expect.poll(async () => Number(await seekBar.inputValue())).toBeGreaterThan(0.2);
+  await seekTo(page, 1);
+  await page.waitForTimeout(200);
+  await seekTo(page, 2);
+  await page.waitForTimeout(200);
+  await page.click('[data-action="play"]'); // pause
+  await expect(page.locator('[data-action="play"]')).toHaveAttribute("aria-label", "Play");
+  await page.click('[data-action="play"]'); // resume
+  await expect(page.locator('[data-action="play"]')).toHaveAttribute("aria-label", "Pause");
+
+  const starts = await page.evaluate(() => window.__starts);
+  expect(starts).toHaveLength(5 * 4);
+  const runs = Array.from({ length: 4 }, (_, run) => starts.slice(run * 5, run * 5 + 5));
+  for (const run of runs) {
+    // All five stems of a run share the exact start time and offset.
+    expect(new Set(run.map((start) => start.when)).size).toBe(1);
+    expect(new Set(run.map((start) => start.offset)).size).toBe(1);
+  }
+  const offsets = runs.map((run) => run[0].offset);
+  expect(offsets[0]).toBe(0);
+  expect(offsets[1]).toBe(1);
+  expect(offsets[2]).toBe(2);
+  // Resuming continues from where it paused, just after 2 s.
+  expect(offsets[3]).toBeGreaterThanOrEqual(2);
+  expect(offsets[3]).toBeLessThan(2.5);
+  // No <audio> elements: everything plays from the decoded buffers.
+  expect(await page.evaluate(() => window.__audios.length)).toBe(0);
+});
+
+test("keeps streaming players in sync on low-memory devices", async ({ page, context }) => {
+  // Pretend the device is so small (1 MB) that even the short test clip's
+  // decoded stems (about 5 MB) would not fit: the player streams them with
+  // <audio> elements and corrects drift instead.
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "deviceMemory", { get: () => 0.001 });
+  });
+  await openApp(page);
+  await separateClip(page, "Streaming", clip);
+  await page.click('[data-action="play"]');
+  await expect.poll(() => page.evaluate(() => window.__audios.filter((a) => a.src).length))
+    .toBe(5);
+  expect(await page.evaluate(() => window.__starts.length)).toBe(0);
+  await expect.poll(() => page.evaluate(() => window.__audios[0].currentTime))
+    .toBeGreaterThan(0.2);
+  // Push one stem 0.2 s off; the next ticks bring it back.
+  await page.evaluate(() => {
+    const [, second] = window.__audios;
+    second.currentTime += 0.2;
+  });
+  await expect.poll(() =>
+    page.evaluate(() => {
+      const [first, second] = window.__audios;
+      return Math.abs(second.currentTime - first.currentTime);
+    }), { timeout: 3000 }).toBeLessThan(0.05);
 });
 
 test("warns about a long track on a low-memory device", async ({ page, context }) => {

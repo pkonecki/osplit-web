@@ -52,3 +52,24 @@ export function isLongForDevice(
 
 export const LONG_TRACK_WARNING =
   "This track is long for this device. If separation stops, try Low quality or a shorter section.";
+
+/** Memory the decoded stems take for sample-accurate playback (float32). */
+export function decodedPlaybackBytes(frameCount: number, stemCount: number): number {
+  return frameCount * CHANNELS * 4 * stemCount;
+}
+
+/**
+ * Which player to use: decoded buffers play in perfect sync, but need the
+ * whole track in memory; streaming <audio> players need little memory and
+ * are kept in sync by correcting drift.
+ */
+export function playbackEngineFor(
+  frameCount: number,
+  stemCount: number,
+  deviceMemoryGb: number | undefined,
+): "buffer" | "media" {
+  return isLongForDevice(decodedPlaybackBytes(frameCount, stemCount), deviceMemoryGb)
+    ? "media"
+    : "buffer";
+}
+

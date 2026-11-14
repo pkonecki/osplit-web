@@ -134,6 +134,7 @@ input::placeholder { color: #899284; }
 .export-format option { color: #111; }
 .player-row { display: flex; align-items: center; gap: .6rem; }
 .play-button { width: 48px; height: 48px; flex: 0 0 48px; display: grid; place-items: center; border: 0; border-radius: 50%; color: var(--ink); background: var(--lime); font-size: 1.2rem; font-weight: 700; cursor: pointer; }
+.play-button:disabled { opacity: .55; cursor: progress; }
 .seek-area { flex: 1; min-width: 0; }
 input[type="range"] { width: 100%; accent-color: var(--lime); cursor: pointer; }
 .time-row { padding: 0 .35rem; }

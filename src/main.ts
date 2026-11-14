@@ -106,7 +106,9 @@ async function render(): Promise<void> {
     root!.innerHTML = renderDetail(state.selectedProject);
     renderedView = `project:${state.selectedProject.id}`;
     restoreForm(snapshot, renderedView);
-    await preparePlayers(state.selectedProject);
+    // Loading the player (decoding the stems) runs in the background; the
+    // play button shows the loading state until it is ready.
+    void preparePlayers(state.selectedProject).catch(showError);
   } else {
     releasePlayers();
     root!.innerHTML = await renderProjects();
