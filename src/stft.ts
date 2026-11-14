@@ -9,6 +9,7 @@ import {
   OVERLAP_BUFFER_SIZE,
   SAMPLES_PER_SEGMENT,
   SEGMENT_FRAMES,
+  toPcm16,
 } from "./audio-core";
 
 /**
@@ -150,6 +151,12 @@ export function logitsToMasks(
 }
 
 /**
+ * One interleaved stereo output buffer per stem: float samples, or 16-bit PCM
+ * (converted with toPcm16, as encodeWav does), e.g. a view into a WAV file.
+ */
+export type StemOutput = Float32Array | Int16Array;
+
+/**
  * Applies masks to the analysed spectra and rebuilds one interleaved stereo
  * signal per stem by inverse FFT and overlap-add. Segments must be
  * synthesized in order; each call writes the output samples that no later
@@ -161,13 +168,21 @@ export class OverlapAddSynthesizer {
   private readonly imaginary = new Float32Array(FRAME_LENGTH);
   private readonly overlap: Float32Array[];
   private readonly plan: StftPlan;
-  private readonly outputs: Float32Array[];
+  private readonly outputs: StemOutput[];
+  private readonly pcm16: boolean;
   private nextSampleToWrite = 0;
 
-  /** `outputs`: one interleaved stereo buffer of frameCount frames per stem. */
-  constructor(plan: StftPlan, outputs: Float32Array[]) {
+  /**
+   * `outputs`: one interleaved stereo buffer of frameCount frames per stem,
+   * all Float32Array or all Int16Array.
+   */
+  constructor(plan: StftPlan, outputs: StemOutput[]) {
     this.plan = plan;
     this.outputs = outputs;
+    this.pcm16 = outputs[0] instanceof Int16Array;
+    if (outputs.some((output) => (output instanceof Int16Array) !== this.pcm16)) {
+      throw new Error("Stem outputs must all have the same sample type.");
+    }
     this.overlap = Array.from(
       { length: outputs.length * CHANNELS },
       () => new Float32Array(OVERLAP_BUFFER_SIZE),
@@ -214,11 +229,21 @@ export class OverlapAddSynthesizer {
       for (let sample = writeStart; sample < safeEnd; sample++) {
         const outputFrame = sample - FRAME_LENGTH;
         const ring = sample % OVERLAP_BUFFER_SIZE;
-        for (let source = 0; source < sourceCount; source++) {
-          const out = outputs[source];
-          out[outputFrame * CHANNELS] = overlap[source * CHANNELS][ring];
-          out[outputFrame * CHANNELS + 1] =
-            overlap[source * CHANNELS + 1][ring];
+        if (this.pcm16) {
+          for (let source = 0; source < sourceCount; source++) {
+            const out = outputs[source];
+            out[outputFrame * CHANNELS] = toPcm16(overlap[source * CHANNELS][ring]);
+            out[outputFrame * CHANNELS + 1] = toPcm16(
+              overlap[source * CHANNELS + 1][ring],
+            );
+          }
+        } else {
+          for (let source = 0; source < sourceCount; source++) {
+            const out = outputs[source];
+            out[outputFrame * CHANNELS] = overlap[source * CHANNELS][ring];
+            out[outputFrame * CHANNELS + 1] =
+              overlap[source * CHANNELS + 1][ring];
+          }
         }
         for (const buffer of overlap) buffer[ring] = 0;
       }

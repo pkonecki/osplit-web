@@ -56,3 +56,26 @@ describe("audio primitives", () => {
     expect(view.getInt16(44, true)).toBe(6553);
   });
 });
+
+describe("PCM conversion", () => {
+  it("rounds and clamps like the WAV encoder", async () => {
+    const { toPcm16 } = await import("./audio-core");
+    expect(toPcm16(0)).toBe(0);
+    expect(toPcm16(1)).toBe(32767);
+    expect(toPcm16(-1)).toBe(-32768);
+    expect(toPcm16(2)).toBe(32767);
+    expect(toPcm16(-2)).toBe(-32768);
+    expect(toPcm16(0.25)).toBe(8192);
+  });
+});
+
+describe("interleaveStereo", () => {
+  it("matches resampleStereo at 44.1 kHz exactly", async () => {
+    const { interleaveStereo, resampleStereo } = await import("./audio-core");
+    const left = Float32Array.from({ length: 5000 }, (_, i) => Math.sin(i * 0.37));
+    const right = Float32Array.from({ length: 5000 }, (_, i) => Math.cos(i * 0.11));
+    expect(interleaveStereo(left, right)).toEqual(resampleStereo(left, right, 44_100));
+    expect(() => interleaveStereo(new Float32Array(0), new Float32Array(0)))
+      .toThrow(/no decodable samples/);
+  });
+});

@@ -3,10 +3,12 @@ import ortWasmModuleUrl from "onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs?ur
 import ortWasmUrl from "onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm?url";
 import {
   CHANNELS,
-  encodeWav,
   FREQUENCY_BINS,
   SAMPLES_PER_SEGMENT,
   SEGMENT_FRAMES,
+  WAV_HEADER_BYTES,
+  wavByteLength,
+  writeWavHeader,
 } from "./audio-core";
 import {
   logitsToMasks,
@@ -186,8 +188,41 @@ async function runSeparation(
     throw new Error("The decoded source has no valid stereo samples.");
   }
   const frameCount = interleavedSamples.length / CHANNELS;
+  const wavFiles: (ArrayBuffer | undefined)[] = await synthesizeWavFiles(
+    interleavedSamples,
+    frameCount,
+    sessions,
+    id,
+    quality,
+  );
+  checkCancelled(id);
+  // Blob creation copies the data: convert one stem at a time and drop its
+  // buffer right away, so only one extra copy exists at once.
+  const stems = {} as Record<Stem, Blob>;
+  STEMS.forEach((stem, index) => {
+    stems[stem] = new Blob([wavFiles[index]!], { type: "audio/wav" });
+    wavFiles[index] = undefined;
+  });
+  return stems;
+}
+
+/**
+ * Runs the models over the input and writes each stem straight into a 16-bit
+ * WAV file buffer as samples become final, with no float copy of the output.
+ */
+async function synthesizeWavFiles(
+  interleavedSamples: Float32Array,
+  frameCount: number,
+  sessions: Partial<Record<Stem, ort.InferenceSession>>,
+  id: string,
+  quality: Quality,
+): Promise<ArrayBuffer[]> {
   const plan = planStft(frameCount);
-  const outputs = STEMS.map(() => new Float32Array(frameCount * CHANNELS));
+  const wavFiles = STEMS.map(() => new ArrayBuffer(wavByteLength(frameCount)));
+  for (const file of wavFiles) writeWavHeader(new DataView(file), frameCount);
+  const outputs = wavFiles.map((file) =>
+    new Int16Array(file, WAV_HEADER_BYTES, frameCount * CHANNELS)
+  );
   const analyzer = new SegmentAnalyzer(interleavedSamples, plan);
   const synthesizer = new OverlapAddSynthesizer(plan, outputs);
   const logits = new Float32Array(
@@ -231,11 +266,7 @@ async function runSeparation(
     );
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }
-
-  checkCancelled(id);
-  return Object.fromEntries(
-    STEMS.map((stem, index) => [stem, encodeWav(outputs[index], frameCount)]),
-  ) as Record<Stem, Blob>;
+  return wavFiles;
 }
 
 let lastDownloadReport = "";
