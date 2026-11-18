@@ -172,6 +172,20 @@ input[type="range"] { width: 100%; accent-color: var(--lime); cursor: pointer; }
 .tempo-status { margin: 0 0 .4rem; color: var(--muted); font-size: .8rem; }
 .tempo-status strong { color: var(--paper); }
 .tempo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1rem; }
+.key-chip { min-width: 4.5rem; }
+.key-panel select { height: 32px; padding: 0 .4rem; border: 1px solid var(--line); border-radius: 8px; color: var(--paper); background: var(--panel); font-size: .8rem; }
+.chord-now { display: flex; align-items: baseline; gap: .7rem; margin-top: .6rem; min-height: 2.4rem; }
+.chord-current { min-width: 4.5rem; color: var(--lime); font-size: 1.9rem; line-height: 1.1; font-weight: 700; font-variant-numeric: tabular-nums; }
+.chord-next { color: var(--muted); font-size: .95rem; font-variant-numeric: tabular-nums; }
+.chord-lane { position: relative; height: 26px; margin-top: .3rem; border-radius: 6px; background: rgba(60, 69, 55, .3); }
+.chord-lane .playhead { position: absolute; top: 0; bottom: 0; left: 0; z-index: 2; width: 2px; margin-left: -1px; background: #f0f1e9; pointer-events: none; }
+.chord-box { position: absolute; top: 2px; bottom: 2px; min-width: 2px; overflow: hidden; padding: 0 3px; border: 1px solid rgba(183, 243, 107, .35); border-radius: 4px; color: var(--paper); background: rgba(183, 243, 107, .1); font-size: .72rem; line-height: 20px; text-align: left; white-space: nowrap; cursor: pointer; }
+.chord-box:hover, .chord-box:focus-visible { z-index: 3; border-color: var(--lime); background: #2c3a22; }
+.chord-box.current { border-color: var(--lime); background: rgba(183, 243, 107, .28); }
+.chord-box.narrow span { visibility: hidden; }
+.chord-box.narrow:hover, .chord-box.narrow:focus-visible { overflow: visible; min-width: max-content; }
+.chord-box.narrow:hover span, .chord-box.narrow:focus-visible span { visibility: visible; }
+.chord-box:focus-visible { outline: 2px solid var(--paper); outline-offset: 1px; }
 .grid-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .waveform .grid-canvas { position: absolute; }
 .loop-ruler .grid-canvas { border-radius: 6px; }

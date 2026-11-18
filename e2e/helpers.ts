@@ -2,11 +2,17 @@ import { expect, type Page } from "@playwright/test";
 import { writeFileSync } from "node:fs";
 
 /**
- * Writes a deterministic stereo 16-bit 44.1 kHz WAV test clip: steady tones,
+ * Writes a deterministic stereo 16-bit 44.1 kHz WAV test clip: steady tones (or,
+ * with `chords`, a C–G–Am–F pad, a chord a bar),
  * plus with `bpm` a drum pattern at that tempo (a kick on every beat, louder
  * on each bar's first beat, and a noise burst on beats 2 and 4).
  */
-export function writeTestClip(file: string, seconds = 3, bpm?: number): void {
+export function writeTestClip(
+  file: string,
+  seconds = 3,
+  bpm?: number,
+  options: { chords?: boolean } = {},
+): void {
   const rate = 44_100;
   const frames = rate * seconds;
   const buffer = Buffer.alloc(44 + frames * 4);
@@ -26,9 +32,11 @@ export function writeTestClip(file: string, seconds = 3, bpm?: number): void {
   let noise = 12345;
   for (let i = 0; i < frames; i++) {
     const t = i / rate;
-    let value = 0.3 * Math.sin(2 * Math.PI * 220 * t) +
-      0.2 * Math.sin(2 * Math.PI * 60 * t) +
-      0.1 * Math.sin(2 * Math.PI * 2500 * t);
+    let value = options.chords
+      ? chordPad(t, 60 / (bpm ?? 120) * 4)
+      : 0.3 * Math.sin(2 * Math.PI * 220 * t) +
+        0.2 * Math.sin(2 * Math.PI * 60 * t) +
+        0.1 * Math.sin(2 * Math.PI * 2500 * t);
     if (bpm) {
       const period = 60 / bpm;
       const beat = Math.floor(t / period);
@@ -47,6 +55,30 @@ export function writeTestClip(file: string, seconds = 3, bpm?: number): void {
     buffer.writeInt16LE(sample, 46 + i * 4);
   }
   writeFileSync(file, buffer);
+}
+
+/** C, G, Am, F (I–V–vi–IV in C): MIDI notes of each triad, and its bass note. */
+const PAD_CHORDS = [
+  { notes: [60, 64, 67], bass: 36 },
+  { notes: [59, 62, 67], bass: 43 },
+  { notes: [60, 64, 69], bass: 45 },
+  { notes: [60, 65, 69], bass: 41 },
+];
+
+/** A pad playing PAD_CHORDS, a chord every `barSeconds`, with a bass note. */
+function chordPad(t: number, barSeconds: number): number {
+  const bar = Math.floor(t / barSeconds);
+  const since = t - bar * barSeconds;
+  const chord = PAD_CHORDS[bar % PAD_CHORDS.length];
+  const envelope = Math.min(1, since / 0.02, (barSeconds - since) / 0.02);
+  const hz = (midi: number) => 440 * 2 ** ((midi - 69) / 12);
+  let value = 0;
+  for (const note of chord.notes) {
+    for (let h = 1; h <= 4; h++) value += (0.08 / h) * Math.sin(2 * Math.PI * hz(note) * h * t);
+  }
+  value += 0.2 * Math.sin(2 * Math.PI * hz(chord.bass) * t) +
+    0.06 * Math.sin(2 * Math.PI * hz(chord.bass) * 2 * t);
+  return value * envelope;
 }
 
 declare global {

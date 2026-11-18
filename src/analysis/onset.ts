@@ -285,7 +285,7 @@ function makeFft(size: number): (real: Float64Array, imaginary: Float64Array) =>
   };
 }
 
-function hann(length: number): Float32Array {
+export function hann(length: number): Float32Array {
   const window = new Float32Array(length);
   for (let i = 0; i < length; i++) {
     window[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / length);
