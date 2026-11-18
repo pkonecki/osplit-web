@@ -37,7 +37,16 @@ declare global {
     __gains: GainNode[];
     __audios: HTMLAudioElement[];
     __progress: { value: number; label: string }[];
-    __starts: { when: number; offset: number }[];
+    __starts: {
+      when: number;
+      offset: number;
+      rate: number;
+      loop: boolean;
+      loopStart: number;
+      loopEnd: number;
+    }[];
+    /** Where the stems' bus was last connected: straight out or the shifter. */
+    __routes: ("direct" | "shifter")[];
   }
 }
 
@@ -63,11 +72,42 @@ export function instrument(): void {
     offset?: number,
     duration?: number,
   ) {
-    window.__starts.push({ when: when ?? 0, offset: offset ?? 0 });
+    window.__starts.push({
+      when: when ?? 0,
+      offset: offset ?? 0,
+      rate: this.playbackRate.value,
+      loop: this.loop,
+      loopStart: this.loopStart,
+      loopEnd: this.loopEnd,
+    });
     return duration === undefined
       ? start.call(this, when, offset)
       : start.call(this, when, offset, duration);
   };
+  window.__routes = [];
+  const connect = AudioNode.prototype.connect as (
+    this: AudioNode,
+    destination: AudioNode,
+    ...rest: number[]
+  ) => AudioNode;
+  AudioNode.prototype.connect = function (
+    this: AudioNode,
+    destination: AudioNode,
+    ...rest: number[]
+  ) {
+    // The bus is the only gain the app makes without createGain that
+    // connects to the speakers or a worklet.
+    if (
+      this instanceof GainNode && !window.__gains.includes(this) &&
+      (destination instanceof AudioWorkletNode ||
+        destination instanceof AudioDestinationNode)
+    ) {
+      window.__routes.push(
+        destination instanceof AudioWorkletNode ? "shifter" : "direct",
+      );
+    }
+    return connect.call(this, destination, ...rest);
+  } as typeof AudioNode.prototype.connect;
   window.__audios = [];
   const NativeAudio = window.Audio;
   window.Audio = function (src?: string) {

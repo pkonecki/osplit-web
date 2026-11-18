@@ -1,8 +1,15 @@
 import "./style.css";
-import { exportAll, exportMix, exportStem, setExportFormat } from "./export";
+import {
+  exportAll,
+  exportMix,
+  exportStem,
+  setExportAppliesPractice,
+  setExportFormat,
+} from "./export";
 import { enableIsolationReload } from "./isolation";
 import { appUrl } from "./paths";
 import {
+  applyPractice,
   applyStemVolume,
   isPlaying,
   pauseAll,
@@ -15,6 +22,16 @@ import {
   setPlayerTick,
 } from "./player";
 import { soloStems, toggleStem } from "./mixing";
+import {
+  clampSemitones,
+  clampSpeed,
+  loopWithEnd,
+  loopWithStart,
+  nudgeLoopEdge,
+  projectSemitones,
+  projectSpeed,
+  SPEED_STEP,
+} from "./practice";
 import { startMediaSession, updateMediaSession } from "./player/media-session";
 import { onRender, state } from "./state";
 import {
@@ -51,7 +68,9 @@ import { renderDetail } from "./view/detail";
 import { confirmDialog } from "./view/dialog";
 import { captureForm, restoreForm } from "./view/form-state";
 import { describeError, escapeHtml } from "./view/format";
+import { installLoopDrag, takeSuppressedClick } from "./view/loop-drag";
 import { updatePlayerDisplay } from "./view/mixer";
+import { updateLoopDisplay, updatePracticeDisplay } from "./view/practice";
 import { renderProjects } from "./view/projects";
 import { showWaveforms, waveformSeekTime } from "./view/waveforms";
 
@@ -65,6 +84,7 @@ setPlayerTick(() => {
 });
 setPlayerLoaded((project) => {
   void showWaveforms(project).catch(console.warn);
+  updateLoopDisplay(state.selectedProject);
   startMediaSession(project.name, {
     play: () => void togglePlay(true).catch(showError),
     pause: () => void togglePlay(false).catch(showError),
@@ -157,6 +177,7 @@ async function render(): Promise<void> {
     // play button shows the loading state until it is ready.
     void preparePlayers(state.selectedProject).catch(showError);
     void showWaveforms(state.selectedProject).catch(console.warn);
+    updateLoopDisplay(state.selectedProject);
   } else {
     releasePlayers();
     root!.innerHTML = await renderProjects();
@@ -275,7 +296,46 @@ async function handleClick(event: Event): Promise<void> {
         if (state.selectedProject) await exportMix(state.selectedProject);
         break;
       case "waveform-seek":
+        // The end of a loop drag, or a press on a loop handle, doesn't seek.
+        if (takeSuppressedClick()) break;
+        if ((event.target as HTMLElement).closest("[data-loop-handle]")) break;
         seekTo(waveformSeekTime(button, (event as MouseEvent).clientX));
+        break;
+      case "speed-step":
+        if (state.selectedProject) {
+          await stepSpeed(state.selectedProject, Number(button.dataset.step));
+        }
+        break;
+      case "key-step":
+        if (state.selectedProject) {
+          await stepKey(state.selectedProject, Number(button.dataset.step));
+        }
+        break;
+      case "practice-reset":
+        if (state.selectedProject) {
+          await savePractice({
+            ...state.selectedProject,
+            speed: 1,
+            semitones: 0,
+            loop: undefined,
+          });
+        }
+        break;
+      case "loop-set":
+        if (state.selectedProject) {
+          await setLoopEdge(
+            state.selectedProject,
+            button.dataset.edge === "start" ? "start" : "end",
+          );
+        }
+        break;
+      case "loop-toggle":
+        if (state.selectedProject) await toggleLoop(state.selectedProject);
+        break;
+      case "loop-clear":
+        if (state.selectedProject) {
+          await savePractice({ ...state.selectedProject, loop: undefined });
+        }
         break;
       case "export-all":
         if (state.selectedProject) await exportAll(state.selectedProject);
@@ -302,11 +362,64 @@ function seekTo(seconds: number): void {
 }
 
 const SEEK_STEP_SECONDS = 5;
+/** How far the arrow keys move a focused loop handle (Shift: 1 s). */
+const LOOP_NUDGE_SECONDS = 0.1;
+
+/**
+ * Applies changed speed, key or loop to the player and the practice bar, and
+ * saves them unless `save` is false (a slider still being dragged).
+ */
+async function savePractice(updated: Project, save = true): Promise<void> {
+  // Set at once, so a quick next key press builds on this change.
+  state.selectedProject = updated;
+  updatePracticeDisplay(updated);
+  const applied = applyPractice(updated);
+  if (save) {
+    const saved = await saveProject(updated);
+    if (state.selectedProject === updated) state.selectedProject = saved;
+  }
+  await applied;
+}
+
+function stepSpeed(project: Project, steps: number): Promise<void> {
+  return savePractice({
+    ...project,
+    speed: clampSpeed(projectSpeed(project) + steps * SPEED_STEP),
+  });
+}
+
+function stepKey(project: Project, steps: number): Promise<void> {
+  return savePractice({
+    ...project,
+    semitones: clampSemitones(projectSemitones(project) + steps),
+  });
+}
+
+/** Sets the loop start (A) or end (B) at the playhead. */
+function setLoopEdge(project: Project, edge: "start" | "end"): Promise<void> {
+  const { position, duration } = playerTime();
+  if (!duration) return Promise.resolve();
+  const loop = edge === "start"
+    ? loopWithStart(project.loop, position, duration)
+    : loopWithEnd(project.loop, position, duration);
+  return savePractice({ ...project, loop });
+}
+
+function toggleLoop(project: Project): Promise<void> {
+  if (!project.loop) return Promise.resolve();
+  return savePractice({
+    ...project,
+    loop: { ...project.loop, enabled: !project.loop.enabled },
+  });
+}
 
 /**
  * Project-page shortcuts: Space plays or pauses, ←/→ seek 5 s, Home returns
- * to the start, and M/S mute or solo the focused stem row. Keys typed into a
- * form field, or used on a focused button or menu, keep their usual meaning.
+ * to the start, and M/S mute or solo the focused stem row. Practice: [ and ]
+ * set the loop start and end, L toggles the loop (Shift+L clears it), − and
+ * = change the speed, comma and period the key, and 0 resets speed and key.
+ * On a focused loop handle, ←/→ move it. Keys typed into a form field, or
+ * used on a focused button or menu, keep their usual meaning.
  */
 async function handleKeyDown(event: KeyboardEvent): Promise<void> {
   const project = state.selectedProject;
@@ -317,6 +430,21 @@ async function handleKeyDown(event: KeyboardEvent): Promise<void> {
   if (!playerTime().ready) return;
   const row = target.closest<HTMLElement>("[data-stem-row]");
   const onButton = target.closest("button") !== null;
+  const handle = target.closest<HTMLElement>("[data-loop-handle]");
+  if (
+    handle && project.loop &&
+    (event.key === "ArrowLeft" || event.key === "ArrowRight")
+  ) {
+    event.preventDefault();
+    const step = (event.shiftKey ? 1 : LOOP_NUDGE_SECONDS) *
+      (event.key === "ArrowLeft" ? -1 : 1);
+    const edge = handle.dataset.loopHandle === "start" ? "start" : "end";
+    await savePractice({
+      ...project,
+      loop: nudgeLoopEdge(project.loop, edge, step, playerTime().duration),
+    });
+    return;
+  }
   switch (event.key) {
     case " ":
       if (onButton) return;
@@ -349,6 +477,36 @@ async function handleKeyDown(event: KeyboardEvent): Promise<void> {
         ?.focus();
       break;
     }
+    case "[":
+    case "]":
+      event.preventDefault();
+      await setLoopEdge(project, event.key === "[" ? "start" : "end");
+      break;
+    case "l":
+    case "L":
+      event.preventDefault();
+      if (event.shiftKey) await savePractice({ ...project, loop: undefined });
+      else await toggleLoop(project);
+      break;
+    case "-":
+    case "_":
+      event.preventDefault();
+      await stepSpeed(project, -1);
+      break;
+    case "=":
+    case "+":
+      event.preventDefault();
+      await stepSpeed(project, 1);
+      break;
+    case ",":
+    case ".":
+      event.preventDefault();
+      await stepKey(project, event.key === "," ? -1 : 1);
+      break;
+    case "0":
+      event.preventDefault();
+      await savePractice({ ...project, speed: 1, semitones: 0 });
+      break;
   }
 }
 
@@ -413,12 +571,22 @@ function handleInput(event: Event): void {
     };
     applyStemVolume(state.selectedProject, stem);
   }
+  if (target.dataset.action === "speed" && state.selectedProject) {
+    void savePractice({
+      ...state.selectedProject,
+      speed: clampSpeed(Number(target.value) / 100),
+    }, false).catch(showError);
+  }
 }
 
 async function handleChange(event: Event): Promise<void> {
   const target = event.target as HTMLInputElement;
   if (target.dataset.action === "export-format") {
     setExportFormat(target.value === "wav" ? "wav" : "flac");
+    return;
+  }
+  if (target.dataset.action === "export-practice") {
+    setExportAppliesPractice(target.checked);
     return;
   }
   if (target.dataset.action === "delete-source-option" && state.selectedProject) {
@@ -433,6 +601,12 @@ async function handleChange(event: Event): Promise<void> {
   }
   if (target.dataset.action === "volume" && state.selectedProject) {
     state.selectedProject = await saveProject(state.selectedProject);
+  }
+  if (target.dataset.action === "speed" && state.selectedProject) {
+    await savePractice({
+      ...state.selectedProject,
+      speed: clampSpeed(Number(target.value) / 100),
+    });
   }
 }
 
@@ -456,6 +630,18 @@ root.addEventListener("click", (event) => {
   void handleClick(event).catch(showError);
 });
 root.addEventListener("input", handleInput);
+installLoopDrag(root, {
+  loop: () => state.selectedProject?.loop,
+  duration: () => playerTime().duration,
+  preview: (loop) => {
+    if (!state.selectedProject) return;
+    void savePractice({ ...state.selectedProject, loop }, false).catch(showError);
+  },
+  commit: (loop) => {
+    if (!state.selectedProject) return;
+    void savePractice({ ...state.selectedProject, loop }).catch(showError);
+  },
+});
 document.addEventListener("keydown", (event) => {
   void handleKeyDown(event).catch(showError);
 });

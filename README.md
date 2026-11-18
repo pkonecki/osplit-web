@@ -95,6 +95,45 @@ lossless FLAC, typically about half the size of WAV. Exports are FLAC by
 default, or WAV when chosen in the mixer, and are saved through the browser's
 download handling.
 
+## Practice tools
+
+The project player can slow down or speed up a track (50–150%) without
+changing its pitch, shift its key (±12 semitones) without changing its speed,
+and repeat an A–B loop. Speed, key and loop are saved with each project.
+
+- **Loop:** set the start (A) and end (B) at the playhead, or drag across a
+  waveform or the strip above the stems to draw a loop. Drag its handles to
+  adjust it; a click still seeks. Seeking after the loop end jumps to the
+  loop start.
+- **Export:** with *Mix with speed, key & loop* ticked in the mixer, the
+  exported mix (alone or in the zip) uses the project's speed and key, and
+  covers only the loop when it is on. Stem exports are never changed.
+
+Key and speed changes go through a pitch shifter,
+[Signalsmith Stretch](https://signalsmith-audio.co.uk/code/stretch/) (MIT),
+running as an AudioWorklet. It is loaded the first time it is needed, adds
+about 120 ms of delay (the position shown allows for it), and is bypassed at
+the original speed and key. Decoded playback changes the speed of the sources
+and lets the shifter correct the pitch; streaming playback (long tracks on
+low-memory devices) lets the browser keep the pitch and only shifts the key.
+Loops are seamless with decoded playback; with streaming playback, the jump
+back to the loop start leaves a short gap.
+
+Keyboard shortcuts on a project page (not while typing in a field):
+
+| Key | Action |
+| --- | --- |
+| Space | Play or pause |
+| ← / → | Seek 5 s back or forward |
+| Home | Back to the start |
+| M / S | Mute or solo the focused stem row |
+| `-` / `=` | Speed −5% / +5% |
+| `,` / `.` | Key down / up a semitone |
+| `0` | Reset speed and key |
+| `[` / `]` | Set the loop start / end at the playhead |
+| L / Shift+L | Turn the loop on or off / clear it |
+| ← / → on a loop handle | Move it 0.1 s (Shift: 1 s) |
+
 ## Installing the app
 
 Installed from the browser (Install app, or Add to Home Screen), OSplit opens
@@ -229,4 +268,5 @@ publishes next to the models. If you use OSplit in research, cite Spleeter:
 ## License
 
 The OSplit Web code is released under the [MIT License](./LICENSE). The models
-are covered by the Spleeter license above.
+are covered by the Spleeter license above. Pitch shifting uses Signalsmith
+Stretch by Geraint Luff, released under the MIT License.

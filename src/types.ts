@@ -1,5 +1,12 @@
 export const STEMS = ["vocals", "piano", "drums", "bass", "other"] as const;
 export type Stem = (typeof STEMS)[number];
+
+/** A project's A–B loop in seconds; `enabled` false plays through it. */
+export interface ProjectLoop {
+  start: number;
+  end: number;
+  enabled: boolean;
+}
 export type Quality = "fp16" | "fp32";
 export type ProjectStatus =
   | "empty"
@@ -27,6 +34,12 @@ export interface Project {
   deleteSourceAfterSeparation?: boolean;
   /** The source audio was deleted after separation; re-import to separate. */
   sourceRemoved?: boolean;
+  /** Playback speed, 0.5–1.5, keeping the pitch. Missing = 1. */
+  speed?: number;
+  /** Key shift in semitones, −12…12, keeping the speed. Missing = 0. */
+  semitones?: number;
+  /** A–B loop; missing when none is set. */
+  loop?: ProjectLoop;
   errorMessage: string | null;
 }
 

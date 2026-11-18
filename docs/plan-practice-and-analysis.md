@@ -52,6 +52,14 @@ unit tests, Playwright coverage and README updates, as M6 and M7 did.
 
 ## M8 — Practice tools: speed, key shift, A–B loop
 
+> **Status: implemented.** The spike chose **Signalsmith Stretch 1.3.2**
+> (MIT). In headless Chromium it shifted a 440 Hz tone to within about 1 Hz
+> from −12 to +7 semitones, added 120 ms of latency, used about 3.5% of one
+> core for stereo, and ran in `OfflineAudioContext`. Under the CSP it works
+> only with `moduleUrl` pointing at the bundled asset: its default `blob:`
+> worklet URL is blocked, which was confirmed. Listening tests on real music
+> remain to be done.
+
 ### Goals
 
 1. **Speed (tempo)** from 50% to 150%, in 5% steps (fine steps with the
