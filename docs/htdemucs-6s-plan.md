@@ -60,8 +60,8 @@ Step 0 and Step 4 replace them with measured ones.
   Spleeter even at equal file size. The `MODEL_FILE_BYTES × MODEL_RUNTIME_FACTOR`
   estimate in `src/memory.ts` does not carry over; measure it (Step 4).
 - **Compute: much heavier.** Expect several times Spleeter's work per second
-  of audio (roughly 5–20×). Fine on WebGPU; on the WASM fallback (most phones
-  and Firefox today) a full track can take minutes instead of seconds.
+  of audio (roughly 5–20×). Fine on WebGPU; on the WASM fallback (browsers or
+  devices without WebGPU) a full track can take minutes instead of seconds.
 - **Int8 runs poorly on WebGPU.** ONNX Runtime Web's WebGPU backend has weak
   int8 support: dynamically quantized operators (`MatMulInteger`,
   `ConvInteger`) are missing or fall back to the CPU, which loses the speed
