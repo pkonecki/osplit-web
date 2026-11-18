@@ -10,6 +10,8 @@ import {
   toPcm16,
   WAV_HEADER_BYTES,
 } from "./audio-core";
+import { renderClickTrack } from "./analysis/click";
+import type { BeatGrid } from "./analysis/grid";
 import { decodeStem } from "./audio-decode";
 import { type AudioFormat, detectAudioFormat } from "./audio-format";
 import { encodeFlac } from "./flac";
@@ -23,7 +25,8 @@ import {
   projectSpeed,
 } from "./practice";
 import { getStem } from "./storage";
-import { type Project, type Stem, STEM_LABELS, STEMS } from "./types";
+import { cachedAnalysis, projectGrid } from "./tasks/analysis";
+import { type Project, STEM_LABELS, STEMS, type Track } from "./types";
 import { safeFileName } from "./view/format";
 import { createZip, type ZipEntry } from "./zip";
 
@@ -101,7 +104,15 @@ export async function stemFile(blob: Blob, format: AudioFormat): Promise<Blob> {
   return encodeWavPcm16(stereoToPcm16(await decodeStem(blob)));
 }
 
-export async function exportStem(project: Project, stem: Stem): Promise<void> {
+export async function exportStem(project: Project, stem: Track): Promise<void> {
+  if (stem === "click") {
+    const format = exportFormat();
+    downloadBlob(
+      await clickFile(project, format),
+      `${safeFileName(project.name)}-click.${format}`,
+    );
+    return;
+  }
   const stored = await getStem(project.id, stem);
   if (!stored) throw new Error(`The ${STEM_LABELS[stem]} stem is missing.`);
   const format = exportFormat();
@@ -135,6 +146,9 @@ export async function exportAll(project: Project): Promise<void> {
       data: await stemFile(stored.blob, format),
     });
   }
+  if (projectGrid(project.id)) {
+    entries.push({ name: `${base}-click.${format}`, data: await clickFile(project, format) });
+  }
   entries.push({
     name: `${base}-${mixName(project)}.${format}`,
     data: await mixFile(project, format),
@@ -142,14 +156,50 @@ export async function exportAll(project: Project): Promise<void> {
   downloadBlob(await createZip(entries), `${base}-stems.zip`);
 }
 
+/** The project's beat grid, which the click export needs. */
+function requireGrid(project: Project): BeatGrid {
+  const grid = projectGrid(project.id);
+  if (!grid) throw new Error("Find the tempo before exporting the click.");
+  return grid;
+}
+
+/** The click track alone, over the whole track at the original speed. */
+async function clickFile(project: Project, format: AudioFormat): Promise<Blob> {
+  const grid = requireGrid(project);
+  const duration = cachedAnalysis(project.id)?.duration ?? 0;
+  const frames = Math.round(duration * SAMPLE_RATE);
+  const click = renderClickTrack(grid, { start: 0, end: duration, speed: 1 }, SAMPLE_RATE, frames);
+  const stereo = new Float32Array(frames * CHANNELS);
+  for (let i = 0; i < frames; i++) {
+    stereo[i * CHANNELS] = click[i];
+    stereo[i * CHANNELS + 1] = click[i];
+  }
+  return format === "wav"
+    ? encodeWav(stereo, frames)
+    : encodeFlac(Int16Array.from(stereo, toPcm16));
+}
+
+/** The click track at its mixer level when it is heard in the mix, else null. */
+function audibleClick(project: Project): { grid: BeatGrid; gain: number } | null {
+  const grid = projectGrid(project.id);
+  const gain = stemVolume(project, "click");
+  return grid && gain > 0 ? { grid, gain } : null;
+}
+
 /**
  * The current mix as a file: mute, solo and volumes, as the player plays it,
- * and the speed, key and loop when exports apply them.
+ * with the click when it is heard, and the speed, key and loop when exports
+ * apply them.
  */
 async function mixFile(project: Project, format: AudioFormat): Promise<Blob> {
+  const click = audibleClick(project);
   const active = STEMS.filter((stem) =>
     project.completedStems.includes(stem) && stemVolume(project, stem) > 0
   );
+  if (active.length === 0 && click) {
+    // Only the click is heard: mix it over silent stems of the right length.
+    active.push(project.completedStems[0]);
+  }
   const records = await Promise.all(
     active.map((stem) => getStem(project.id, stem)),
   );
@@ -161,24 +211,52 @@ async function mixFile(project: Project, format: AudioFormat): Promise<Blob> {
   );
   const gains = active.map((stem) => stemVolume(project, stem));
   const practice = exportPractice(project);
+  let clickTrack: ((frames: number) => Float32Array) | undefined;
+  if (click) {
+    const region = {
+      start: practice?.region?.start ?? 0,
+      end: practice?.region?.end ?? Infinity,
+      speed: practice?.speed ?? 1,
+    };
+    clickTrack = (frames) => {
+      const track = renderClickTrack(click.grid, region, SAMPLE_RATE, frames);
+      for (let i = 0; i < track.length; i++) track[i] *= click.gain;
+      return track;
+    };
+  }
   const mixed = practice
-    ? await renderPracticeMix(decoded, gains, practice)
-    : mixStems(decoded, gains);
+    ? await renderPracticeMix(decoded, gains, practice, clickTrack)
+    : mixWithClick(decoded, gains, clickTrack);
   return format === "wav"
     ? encodeWav(mixed, mixed.length / CHANNELS)
     : encodeFlac(Int16Array.from(mixed, toPcm16));
 }
 
+/** `mixStems`, with a mono click track (for its frame count) added before scaling. */
+function mixWithClick(
+  stems: StereoChannels[],
+  gains: number[],
+  click?: (frames: number) => Float32Array,
+): Float32Array {
+  if (!click) return mixStems(stems, gains);
+  const frames = stems[0]?.left.length ?? 0;
+  const track = click(frames);
+  const withClick = [...stems, { left: track, right: track }];
+  return mixStems(withClick, [...gains, 1]);
+}
+
 /**
  * Mixes stems as the player plays them with practice settings, in an offline
  * audio context: sources at the speed, through the pitch shifter, over the
- * loop region only when one is given. Returns interleaved stereo, scaled
- * down if it would clip, like `mixStems`.
+ * loop region only when one is given. A click track (rendered for the
+ * output's frame count, at the speed) is added without pitch shifting.
+ * Returns interleaved stereo, scaled down if it would clip, like `mixStems`.
  */
 export async function renderPracticeMix(
   stems: StereoChannels[],
   gains: number[],
   practice: MixPractice,
+  click?: (frames: number) => Float32Array,
 ): Promise<Float32Array> {
   if (stems.length === 0 || stems.length !== gains.length) {
     throw new Error("No usable stems are selected for the mix.");
@@ -224,10 +302,12 @@ export async function renderPracticeMix(
   const left = rendered.getChannelData(0);
   const right = rendered.getChannelData(1);
   const output = new Float32Array(outputFrames * CHANNELS);
+  const clickTrack = click?.(outputFrames);
   let peak = 0;
   for (let frame = 0; frame < outputFrames; frame++) {
-    const l = left[frame + delay] ?? 0;
-    const r = right[frame + delay] ?? 0;
+    const extra = clickTrack?.[frame] ?? 0;
+    const l = (left[frame + delay] ?? 0) + extra;
+    const r = (right[frame + delay] ?? 0) + extra;
     output[frame * CHANNELS] = l;
     output[frame * CHANNELS + 1] = r;
     peak = Math.max(peak, Math.abs(l), Math.abs(r));

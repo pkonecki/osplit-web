@@ -307,6 +307,24 @@ Stem exports stay untouched. Only the mix gets processed.
 
 ## M9 — Tempo, beat grid and click track
 
+> **Status: implemented**, except the optional count-in. Differences from
+> the plan below:
+> - Analysis progress shows in the tempo chip rather than the separation
+>   progress card, and doesn't block other work.
+> - The beat source adds the bass stem's low-band onsets to the drums (the
+>   separation often splits the kick between them), and the tempo prior is
+>   0.8 octave wide rather than 1, so a backbeat reads as 120 rather than 60.
+> - Confidence is the mean-removed (Pearson) autocorrelation at one or two
+>   beats. Below 0.1 no beats are stored ("No beat found"), so steady tones
+>   and separation artefacts give no grid.
+> - Tap tempo anchors the grid on the last tap rather than the nearest
+>   strong onset.
+> - On synthetic patterns (unit tests) the tempo is within ±1 BPM at 90, 120,
+>   128 and 174 BPM with beat F-measure ≥ 0.9. The analysis of a 4-minute
+>   track takes about 1.2 s in Node in the development container, plus
+>   decoding the drum and bass stems. Listening tests on real music and
+>   timing on phones are still to do.
+
 ### Goals
 
 1. Detect **BPM** and a **beat grid**, with an estimate of downbeats (bar

@@ -1,5 +1,7 @@
 export const STEMS = ["vocals", "piano", "drums", "bass", "other"] as const;
 export type Stem = (typeof STEMS)[number];
+/** A mixer row: a stem, or the click track (once the beats are analysed). */
+export type Track = Stem | "click";
 
 /** A project's A–B loop in seconds; `enabled` false plays through it. */
 export interface ProjectLoop {
@@ -28,8 +30,12 @@ export interface Project {
   completedStems: Stem[];
   volumes: Record<Stem, number>;
   mutedStems: Stem[];
-  /** Soloed stems. Missing on projects saved before solo existed. */
-  soloStems?: Stem[];
+  /** Soloed rows. Missing on projects saved before solo existed. */
+  soloStems?: Track[];
+  /** Click track level, 0–1. Missing = DEFAULT_CLICK_VOLUME. */
+  clickVolume?: number;
+  /** The click is heard (it is muted until turned on). */
+  clickOn?: boolean;
   /** Delete the source audio once separation succeeds (saves space). */
   deleteSourceAfterSeparation?: boolean;
   /** The source audio was deleted after separation; re-import to separate. */
@@ -43,6 +49,39 @@ export interface Project {
   errorMessage: string | null;
 }
 
+export type BeatsPerBar = 3 | 4;
+
+/** Corrections the user made to the detected beat grid. */
+export interface GridEdits {
+  /** Tempo ×2 or ÷2 (beats inserted halfway, or every other one dropped). */
+  bpmFactor?: number;
+  /** Moves bar starts by this many beats. */
+  downbeatShift?: number;
+  beatsPerBar?: BeatsPerBar;
+  /** An even grid from tap tempo: the tempo, and a tap (track seconds) on a beat. */
+  tapped?: { bpm: number; anchor: number };
+}
+
+/** Rhythm analysis of a project's stems, stored with the project. */
+export interface AnalysisRecord {
+  projectId: string;
+  /** Bumped when an algorithm changes; older records are analysed again. */
+  algorithmVersion: number;
+  /** What the beats were found in: the drum stem, or every stem summed. */
+  source: "drums" | "mix";
+  /** Track length, seconds. */
+  duration: number;
+  bpm: number;
+  bpmConfidence: number;
+  /** The other likely octave of the tempo, if any. */
+  alternativeBpm: number | null;
+  /** Beat times, seconds. */
+  beats: Float32Array;
+  beatsPerBar: BeatsPerBar;
+  firstDownbeatIndex: number;
+  edits?: GridEdits;
+}
+
 export interface StoredBlob {
   id: string;
   blob: Blob;
@@ -54,6 +93,17 @@ export interface ModelRecord {
   blob: Blob;
   storedAt: number;
 }
+
+export const DEFAULT_CLICK_VOLUME = 0.8;
+
+export const TRACK_LABELS: Record<Track, string> = {
+  vocals: "Vocals",
+  piano: "Piano",
+  drums: "Drums",
+  bass: "Bass",
+  other: "Other",
+  click: "Click",
+};
 
 export const STEM_LABELS: Record<Stem, string> = {
   vocals: "Vocals",

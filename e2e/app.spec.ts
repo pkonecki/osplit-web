@@ -362,7 +362,7 @@ test("mixer extras: solo, shortcuts, waveforms, media session and zip", async ({
 
   // Waveforms: drawn from the peaks saved with the separation; a click seeks.
   const drawnPixels = (stem: string) =>
-    page.locator(`[data-waveform="${stem}"] canvas`).evaluate((canvas: HTMLCanvasElement) => {
+    page.locator(`[data-waveform="${stem}"] canvas:not(.grid-canvas)`).evaluate((canvas: HTMLCanvasElement) => {
       const data = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data;
       let count = 0;
       for (let i = 3; i < data.length; i += 4) if (data[i] > 0) count++;

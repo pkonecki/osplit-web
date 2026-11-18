@@ -9,6 +9,15 @@ import {
 import { enableIsolationReload } from "./isolation";
 import { appUrl } from "./paths";
 import {
+  barLoop,
+  LOW_CONFIDENCE,
+  loopBars,
+  MAX_BPM_FACTOR,
+  MIN_BPM_FACTOR,
+  snapTime,
+  tapTempo,
+} from "./analysis/grid";
+import {
   applyPractice,
   applyStemVolume,
   isPlaying,
@@ -18,6 +27,7 @@ import {
   preparePlayers,
   releasePlayers,
   seekAll,
+  setClickGrid,
   setPlayerLoaded,
   setPlayerTick,
 } from "./player";
@@ -44,6 +54,15 @@ import {
 } from "./storage";
 import { heldTaskLocks, taskLockName, withTaskLock } from "./task-lock";
 import {
+  analyzeProject,
+  cachedAnalysis,
+  forgetAnalysis,
+  loadAnalysis,
+  onAnalysisChange,
+  projectGrid,
+  saveGridEdits,
+} from "./tasks/analysis";
+import {
   cancelSeparation,
   separateProject,
   terminateInferenceWorker,
@@ -63,7 +82,13 @@ import {
   takeSharedFile,
 } from "./tasks/import";
 import { installWakeLock } from "./tasks/wake-lock";
-import { newProject, type Project, type Quality, type Stem } from "./types";
+import {
+  type GridEdits,
+  newProject,
+  type Project,
+  type Quality,
+  type Track,
+} from "./types";
 import { renderDetail } from "./view/detail";
 import { confirmDialog } from "./view/dialog";
 import { captureForm, restoreForm } from "./view/form-state";
@@ -72,7 +97,8 @@ import { installLoopDrag, takeSuppressedClick } from "./view/loop-drag";
 import { updatePlayerDisplay } from "./view/mixer";
 import { updateLoopDisplay, updatePracticeDisplay } from "./view/practice";
 import { renderProjects } from "./view/projects";
-import { showWaveforms, waveformSeekTime } from "./view/waveforms";
+import { setTempoPanelOpen, tempoPanelOpen } from "./view/tempo";
+import { setGridOverlay, showWaveforms, waveformSeekTime } from "./view/waveforms";
 
 const root = document.querySelector<HTMLDivElement>("#app");
 if (!root) throw new Error("The app root element is missing.");
@@ -85,12 +111,18 @@ setPlayerTick(() => {
 setPlayerLoaded((project) => {
   void showWaveforms(project).catch(console.warn);
   updateLoopDisplay(state.selectedProject);
+  if (state.selectedProject) refreshAnalysis(state.selectedProject);
   startMediaSession(project.name, {
     play: () => void togglePlay(true).catch(showError),
     pause: () => void togglePlay(false).catch(showError),
     seek: seekTo,
     time: () => playerTime(),
   });
+});
+onAnalysisChange((projectId) => {
+  if (state.selectedProject?.id === projectId && renderedView?.startsWith("project:")) {
+    refreshAnalysis(state.selectedProject);
+  }
 });
 installWakeLock();
 void start();
@@ -178,6 +210,16 @@ async function render(): Promise<void> {
     void preparePlayers(state.selectedProject).catch(showError);
     void showWaveforms(state.selectedProject).catch(console.warn);
     updateLoopDisplay(state.selectedProject);
+    const project = state.selectedProject;
+    if (project.completedStems.length) {
+      void loadAnalysis(project)
+        .then(() => {
+          if (state.selectedProject?.id === project.id) {
+            refreshAnalysis(state.selectedProject);
+          }
+        })
+        .catch(console.warn);
+    }
   } else {
     releasePlayers();
     root!.innerHTML = await renderProjects();
@@ -233,6 +275,7 @@ async function handleClick(event: Event): Promise<void> {
           )
         ) {
           await deleteProject(id);
+          forgetAnalysis(id);
           if (state.selectedProject?.id === id) state.selectedProject = null;
           await render();
         }
@@ -279,17 +322,17 @@ async function handleClick(event: Event): Promise<void> {
         break;
       case "mute":
         if (state.selectedProject && button.dataset.stem) {
-          await toggleMute(state.selectedProject, button.dataset.stem as Stem);
+          await toggleMute(state.selectedProject, button.dataset.stem as Track);
         }
         break;
       case "solo":
         if (state.selectedProject && button.dataset.stem) {
-          await toggleSolo(state.selectedProject, button.dataset.stem as Stem);
+          await toggleSolo(state.selectedProject, button.dataset.stem as Track);
         }
         break;
       case "export-stem":
         if (state.selectedProject && button.dataset.stem) {
-          await exportStem(state.selectedProject, button.dataset.stem as Stem);
+          await exportStem(state.selectedProject, button.dataset.stem as Track);
         }
         break;
       case "export-mix":
@@ -339,6 +382,55 @@ async function handleClick(event: Event): Promise<void> {
         break;
       case "export-all":
         if (state.selectedProject) await exportAll(state.selectedProject);
+        break;
+      case "loop-bars":
+        if (state.selectedProject) {
+          await loopBarsFromPlayhead(state.selectedProject, Number(button.dataset.bars));
+        }
+        break;
+      case "analyze":
+        if (state.selectedProject) {
+          void analyzeProject(state.selectedProject);
+        }
+        break;
+      case "tempo-panel":
+        setTempoPanelOpen(!tempoPanelOpen());
+        if (state.selectedProject) updatePracticeDisplay(state.selectedProject);
+        break;
+      case "tempo-factor":
+        if (state.selectedProject) {
+          await editGrid(state.selectedProject, (edits) => {
+            const factor = Math.max(
+              MIN_BPM_FACTOR,
+              Math.min(MAX_BPM_FACTOR, (edits.bpmFactor ?? 1) * Number(button.dataset.factor)),
+            );
+            return { ...edits, bpmFactor: factor === 1 ? undefined : factor };
+          });
+        }
+        break;
+      case "tempo-metre":
+        if (state.selectedProject) {
+          const beatsPerBar = Number(button.dataset.beats) === 3 ? 3 : 4;
+          await editGrid(state.selectedProject, (edits) => ({ ...edits, beatsPerBar }));
+        }
+        break;
+      case "tempo-downbeat":
+        if (state.selectedProject) {
+          const step = Number(button.dataset.step);
+          await editGrid(state.selectedProject, (edits) => ({
+            ...edits,
+            downbeatShift: (edits.downbeatShift ?? 0) + step,
+          }));
+        }
+        break;
+      case "tempo-tap":
+        if (state.selectedProject) await tap(state.selectedProject);
+        break;
+      case "tempo-reset":
+        if (state.selectedProject) {
+          taps = [];
+          await editGrid(state.selectedProject, () => ({}));
+        }
         break;
     }
   } catch (error) {
@@ -414,10 +506,107 @@ function toggleLoop(project: Project): Promise<void> {
 }
 
 /**
+ * Applies the project's analysis to the page and the player: the click's
+ * grid, the grid overlay, the tempo chip. Re-renders when the click row has
+ * to appear or go.
+ */
+function refreshAnalysis(project: Project): void {
+  const grid = projectGrid(project.id);
+  setClickGrid(project.id, grid);
+  setGridOverlay(
+    grid,
+    playerTime().duration || cachedAnalysis(project.id)?.duration || 0,
+  );
+  updatePracticeDisplay(project);
+  const hasRow = document.querySelector('[data-stem-row="click"]') !== null;
+  if (hasRow !== (grid !== null)) void render();
+}
+
+/** Saves a correction to the project's beat grid. */
+async function editGrid(
+  project: Project,
+  change: (edits: GridEdits) => GridEdits,
+): Promise<void> {
+  const record = cachedAnalysis(project.id);
+  if (!record) return;
+  const edits = change(record.edits ?? {});
+  // Drop unset fields, so "no corrections" is an empty object.
+  for (const key of Object.keys(edits) as (keyof GridEdits)[]) {
+    if (edits[key] === undefined) delete edits[key];
+  }
+  await saveGridEdits(project.id, edits);
+}
+
+/** Tap times (seconds, page clock) of the current tap-tempo run. */
+let taps: number[] = [];
+/** A pause this long between taps starts a new run. */
+const TAP_RESET_SECONDS = 2;
+
+/**
+ * Tap tempo: after four taps, replaces the grid with an even one at the
+ * tapped tempo (allowing for the speed), with a beat at the last tap.
+ */
+async function tap(project: Project): Promise<void> {
+  if (!cachedAnalysis(project.id)) return;
+  const now = performance.now() / 1000;
+  if (taps.length && now - taps[taps.length - 1] > TAP_RESET_SECONDS) taps = [];
+  taps.push(now);
+  const heard = tapTempo(taps);
+  const tapButton = document.querySelector<HTMLElement>('[data-action="tempo-tap"]');
+  if (tapButton) tapButton.textContent = heard ? "Tap tempo" : `Tap ${taps.length}…`;
+  if (!heard) return;
+  const bpm = Math.round((heard / projectSpeed(project)) * 10) / 10;
+  await editGrid(project, (edits) => ({
+    beatsPerBar: edits.beatsPerBar,
+    tapped: { bpm, anchor: playerTime().position },
+  }));
+}
+
+/** Loops `bars` bars from the bar containing the playhead. */
+function loopBarsFromPlayhead(project: Project, bars: number): Promise<void> {
+  const grid = projectGrid(project.id);
+  const { position, duration } = playerTime();
+  const region = grid && duration ? barLoop(grid, position, bars, duration) : null;
+  if (!region) return Promise.resolve();
+  return savePractice({ ...project, loop: { ...region, enabled: true } });
+}
+
+/** B: loops the current bar; again, on a bar loop, doubles its length. */
+function loopCurrentBar(project: Project): Promise<void> {
+  const grid = projectGrid(project.id);
+  const loop = project.loop;
+  if (grid && loop?.enabled) {
+    const bars = loopBars(grid, loop);
+    const { position, duration } = playerTime();
+    if (bars && bars < 64 && position >= loop.start - 0.05 && position <= loop.end) {
+      const region = barLoop(grid, loop.start, bars * 2, duration);
+      if (region) return savePractice({ ...project, loop: { ...region, enabled: true } });
+    }
+  }
+  return loopBarsFromPlayhead(project, 1);
+}
+
+/** Turns the click on or off (C). */
+async function toggleClick(project: Project): Promise<void> {
+  if (!projectGrid(project.id)) return;
+  await toggleMute(project, "click");
+}
+
+/** Where a dragged loop edge lands: the nearest beat, or bar with Alt. */
+function snapLoopTime(seconds: number, event: PointerEvent): number {
+  const project = state.selectedProject;
+  const grid = project ? projectGrid(project.id) : null;
+  if (!grid || grid.confidence < LOW_CONFIDENCE || event.shiftKey) return seconds;
+  return snapTime(grid, seconds, event.altKey ? "bar" : "beat");
+}
+
+/**
  * Project-page shortcuts: Space plays or pauses, ←/→ seek 5 s, Home returns
  * to the start, and M/S mute or solo the focused stem row. Practice: [ and ]
  * set the loop start and end, L toggles the loop (Shift+L clears it), − and
  * = change the speed, comma and period the key, and 0 resets speed and key.
+ * Rhythm: B loops the current bar (again to double it), C turns the click
+ * on or off, and T taps the tempo while the tempo panel is open.
  * On a focused loop handle, ←/→ move it. Keys typed into a form field, or
  * used on a focused button or menu, keep their usual meaning.
  */
@@ -469,8 +658,11 @@ async function handleKeyDown(event: KeyboardEvent): Promise<void> {
     case "S": {
       if (!row) return;
       event.preventDefault();
-      const stem = row.dataset.stemRow as Stem;
-      if (event.key.toLowerCase() === "m") await toggleMute(project, stem);
+      const stem = row.dataset.stemRow as Track;
+      if (event.key.toLowerCase() === "m") {
+        if (stem === "click") await toggleClick(project);
+        else await toggleMute(project, stem);
+      }
       else await toggleSolo(project, stem);
       // The re-render replaced the row; keep the focus on it.
       document.querySelector<HTMLElement>(`[data-stem-row="${stem}"]`)
@@ -507,6 +699,25 @@ async function handleKeyDown(event: KeyboardEvent): Promise<void> {
       event.preventDefault();
       await savePractice({ ...project, speed: 1, semitones: 0 });
       break;
+    case "b":
+    case "B":
+      if (!projectGrid(project.id)) return;
+      event.preventDefault();
+      await loopCurrentBar(project);
+      break;
+    case "c":
+    case "C":
+      if (!projectGrid(project.id)) return;
+      event.preventDefault();
+      await toggleClick(project);
+      document.querySelector<HTMLElement>('[data-stem-row="click"]')?.focus();
+      break;
+    case "t":
+    case "T":
+      if (!tempoPanelOpen() || !cachedAnalysis(project.id)) return;
+      event.preventDefault();
+      await tap(project);
+      break;
   }
 }
 
@@ -534,16 +745,21 @@ async function importSource(file: File): Promise<void> {
     file,
     file.name,
   );
+  forgetAnalysis(state.selectedProject.id);
   state.screenMessage = "";
   await render();
 }
 
-async function toggleMute(project: Project, stem: Stem): Promise<void> {
-  await saveMix({ ...project, mutedStems: toggleStem(project.mutedStems, stem) });
+async function toggleMute(project: Project, track: Track): Promise<void> {
+  if (track === "click") {
+    await saveMix({ ...project, clickOn: !project.clickOn });
+    return;
+  }
+  await saveMix({ ...project, mutedStems: toggleStem(project.mutedStems, track) });
 }
 
-async function toggleSolo(project: Project, stem: Stem): Promise<void> {
-  await saveMix({ ...project, soloStems: toggleStem(soloStems(project), stem) });
+async function toggleSolo(project: Project, track: Track): Promise<void> {
+  await saveMix({ ...project, soloStems: toggleStem(soloStems(project), track) });
 }
 
 /** Applies a changed mute/solo state to every stem, saves it and re-renders. */
@@ -551,6 +767,7 @@ async function saveMix(updated: Project): Promise<void> {
   // Set at once, so a quick next key press builds on this change.
   state.selectedProject = updated;
   for (const stem of updated.completedStems) applyStemVolume(updated, stem);
+  applyStemVolume(updated, "click");
   state.selectedProject = await saveProject(updated);
   await render();
 }
@@ -563,12 +780,14 @@ function handleInput(event: Event): void {
     target.dataset.action === "volume" && state.selectedProject &&
     target.dataset.stem
   ) {
-    const stem = target.dataset.stem as Stem;
+    const stem = target.dataset.stem as Track;
     const value = Math.max(0, Math.min(1, Number(target.value) || 0));
-    state.selectedProject = {
-      ...state.selectedProject,
-      volumes: { ...state.selectedProject.volumes, [stem]: value },
-    };
+    state.selectedProject = stem === "click"
+      ? { ...state.selectedProject, clickVolume: value }
+      : {
+        ...state.selectedProject,
+        volumes: { ...state.selectedProject.volumes, [stem]: value },
+      };
     applyStemVolume(state.selectedProject, stem);
   }
   if (target.dataset.action === "speed" && state.selectedProject) {
@@ -641,6 +860,7 @@ installLoopDrag(root, {
     if (!state.selectedProject) return;
     void savePractice({ ...state.selectedProject, loop }).catch(showError);
   },
+  snap: snapLoopTime,
 });
 document.addEventListener("keydown", (event) => {
   void handleKeyDown(event).catch(showError);

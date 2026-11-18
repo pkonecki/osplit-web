@@ -1,8 +1,12 @@
 import { expect, type Page } from "@playwright/test";
 import { writeFileSync } from "node:fs";
 
-/** Writes a deterministic stereo 16-bit 44.1 kHz WAV test clip. */
-export function writeTestClip(file: string, seconds = 3): void {
+/**
+ * Writes a deterministic stereo 16-bit 44.1 kHz WAV test clip: steady tones,
+ * plus with `bpm` a drum pattern at that tempo (a kick on every beat, louder
+ * on each bar's first beat, and a noise burst on beats 2 and 4).
+ */
+export function writeTestClip(file: string, seconds = 3, bpm?: number): void {
   const rate = 44_100;
   const frames = rate * seconds;
   const buffer = Buffer.alloc(44 + frames * 4);
@@ -19,11 +23,25 @@ export function writeTestClip(file: string, seconds = 3): void {
   buffer.writeUInt16LE(16, 34);
   buffer.write("data", 36);
   buffer.writeUInt32LE(frames * 4, 40);
+  let noise = 12345;
   for (let i = 0; i < frames; i++) {
     const t = i / rate;
-    const value = 0.3 * Math.sin(2 * Math.PI * 220 * t) +
+    let value = 0.3 * Math.sin(2 * Math.PI * 220 * t) +
       0.2 * Math.sin(2 * Math.PI * 60 * t) +
       0.1 * Math.sin(2 * Math.PI * 2500 * t);
+    if (bpm) {
+      const period = 60 / bpm;
+      const beat = Math.floor(t / period);
+      const since = t - beat * period;
+      // Kick: a falling sine, louder on the bar's first beat.
+      const kick = (beat % 4 === 0 ? 0.6 : 0.35) * Math.exp(-since / 0.05) *
+        Math.sin(2 * Math.PI * (50 + 100 * Math.exp(-since / 0.02)) * since);
+      noise = (noise * 1664525 + 1013904223) >>> 0;
+      const snare = beat % 2 === 1
+        ? 0.3 * Math.exp(-since / 0.03) * (noise / 2 ** 32 - 0.5) * 2
+        : 0;
+      value = value * 0.5 + kick + snare;
+    }
     const sample = Math.round(value * 32767);
     buffer.writeInt16LE(sample, 44 + i * 4);
     buffer.writeInt16LE(sample, 46 + i * 4);

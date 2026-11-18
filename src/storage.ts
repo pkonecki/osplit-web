@@ -1,5 +1,6 @@
 import { audioExtension } from "./audio-format";
 import {
+  type AnalysisRecord,
   type ModelRecord,
   type Project,
   type Stem,
@@ -13,6 +14,7 @@ const SOURCES = "sources";
 const STEM_BLOBS = "stems";
 const MODELS = "models";
 const PEAKS = "peaks";
+const ANALYSIS = "analysis";
 
 /**
  * Schema changes, in order: migration N upgrades the database from version N
@@ -31,6 +33,10 @@ export const MIGRATIONS: ReadonlyArray<
   // 2: waveform overviews, one record per stem, keyed `${projectId}:${stem}`.
   (db) => {
     db.createObjectStore(PEAKS, { keyPath: "id" });
+  },
+  // 3: rhythm analysis, one record per project, keyed by project id.
+  (db) => {
+    db.createObjectStore(ANALYSIS, { keyPath: "projectId" });
   },
 ];
 
@@ -201,11 +207,15 @@ export async function updateProjectTask(
 export async function deleteProject(id: string): Promise<void> {
   const db = await openDatabase();
   await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction([PROJECTS, SOURCES, STEM_BLOBS, PEAKS], "readwrite");
+    const tx = db.transaction(
+      [PROJECTS, SOURCES, STEM_BLOBS, PEAKS, ANALYSIS],
+      "readwrite",
+    );
     tx.objectStore(PROJECTS).delete(id);
     tx.objectStore(SOURCES).delete(id);
     tx.objectStore(STEM_BLOBS).delete(projectStemRange(id));
     tx.objectStore(PEAKS).delete(projectStemRange(id));
+    tx.objectStore(ANALYSIS).delete(id);
     tx.oncomplete = () => resolve();
     tx.onerror = () =>
       reject(tx.error ?? new Error("Could not delete the project."));
@@ -221,7 +231,10 @@ export async function replaceSource(
 ): Promise<Project> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction([PROJECTS, SOURCES, STEM_BLOBS, PEAKS], "readwrite");
+    const tx = db.transaction(
+      [PROJECTS, SOURCES, STEM_BLOBS, PEAKS, ANALYSIS],
+      "readwrite",
+    );
     const projects = tx.objectStore(PROJECTS);
     const sourceRequest = projects.get(project.id);
     let updated: Project | undefined;
@@ -249,6 +262,7 @@ export async function replaceSource(
       );
       tx.objectStore(STEM_BLOBS).delete(projectStemRange(project.id));
       tx.objectStore(PEAKS).delete(projectStemRange(project.id));
+      tx.objectStore(ANALYSIS).delete(project.id);
     };
     sourceRequest.onerror = () =>
       reject(
@@ -311,7 +325,7 @@ export async function completeSeparation(
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(
-      [PROJECTS, SOURCES, STEM_BLOBS, PEAKS],
+      [PROJECTS, SOURCES, STEM_BLOBS, PEAKS, ANALYSIS],
       "readwrite",
     );
     const projects = tx.objectStore(PROJECTS);
@@ -337,6 +351,8 @@ export async function completeSeparation(
           );
         }
       });
+      // New stems need a new analysis.
+      tx.objectStore(ANALYSIS).delete(projectId);
       const removeSource = current.deleteSourceAfterSeparation === true;
       if (removeSource) tx.objectStore(SOURCES).delete(projectId);
       updated = {
@@ -395,6 +411,32 @@ export async function putPeaks(
     "readwrite",
     (tx) => tx.objectStore(PEAKS).put({ id: `${projectId}:${stem}`, peaks } satisfies StoredPeaks),
   );
+}
+
+export function getAnalysis(projectId: string): Promise<AnalysisRecord | undefined> {
+  return transaction(
+    [ANALYSIS],
+    "readonly",
+    (tx) => tx.objectStore(ANALYSIS).get(projectId),
+  );
+}
+
+/** Saves an analysis, unless its project was deleted meanwhile. */
+export async function putAnalysis(record: AnalysisRecord): Promise<boolean> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([PROJECTS, ANALYSIS], "readwrite");
+    const request = tx.objectStore(PROJECTS).getKey(record.projectId);
+    let saved = false;
+    request.onsuccess = () => {
+      if (request.result === undefined) return;
+      tx.objectStore(ANALYSIS).put(record);
+      saved = true;
+    };
+    tx.oncomplete = () => resolve(saved);
+    tx.onerror = () => reject(tx.error ?? new Error("Could not save the rhythm analysis."));
+    tx.onabort = () => reject(tx.error ?? new Error("Saving the rhythm analysis was aborted."));
+  });
 }
 
 export async function putModel(record: ModelRecord): Promise<void> {

@@ -10,6 +10,24 @@ function project(changes: Partial<Project> = {}): Project {
   };
 }
 
+describe("click row", () => {
+  it("is muted until turned on, then plays at its volume", () => {
+    expect(stemVolume(project(), "click")).toBe(0);
+    expect(stemVolume(project({ clickOn: true }), "click")).toBe(0.8);
+    expect(stemVolume(project({ clickOn: true, clickVolume: 0.4 }), "click")).toBe(0.4);
+  });
+
+  it("follows the solo rule like the stems", () => {
+    const clickSolo = project({ clickOn: true, soloStems: ["click"] });
+    expect(stemVolume(clickSolo, "click")).toBe(0.8);
+    expect(stemVolume(clickSolo, "vocals")).toBe(0);
+    const vocalSolo = project({ clickOn: true, soloStems: ["vocals"] });
+    expect(stemVolume(vocalSolo, "click")).toBe(0);
+    // Soloed but off: still silent.
+    expect(stemVolume(project({ soloStems: ["click"] }), "click")).toBe(0);
+  });
+});
+
 describe("stem volume rule", () => {
   it("uses each stem's volume when nothing is muted or soloed", () => {
     expect(stemVolume(project(), "vocals")).toBe(0.8);
