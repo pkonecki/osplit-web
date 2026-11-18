@@ -17,7 +17,7 @@ let shownProjectId: string | null = null;
 
 /** A stem row's waveform; `silent` dims it (muted, or another stem soloed). */
 export function waveformMarkup(stem: Stem, silent: boolean): string {
-  return `<div class="waveform${silent ? " silent" : ""}" data-action="waveform-seek" data-waveform="${stem}" aria-hidden="true"><canvas></canvas><span class="playhead"></span></div>`;
+  return `<div class="waveform${silent ? " silent" : ""}" data-action="waveform-seek" data-waveform="${stem}" aria-hidden="true"><canvas></canvas><span class="loop-band" hidden></span><span class="playhead"></span></div>`;
 }
 
 /**
@@ -83,12 +83,16 @@ function draw(element: HTMLElement, peaks: Float32Array): void {
 export function updatePlayheads(): void {
   const { position, duration } = playerTime();
   const percent = duration ? (position / duration) * 100 : 0;
-  for (const head of document.querySelectorAll<HTMLElement>(".waveform .playhead")) {
+  for (
+    const head of document.querySelectorAll<HTMLElement>(
+      ".waveform .playhead, .loop-ruler .playhead",
+    )
+  ) {
     head.style.left = `${percent}%`;
   }
 }
 
-/** The track position (seconds) at a click on a waveform. */
+/** The track position (seconds) at `clientX` over a waveform or the loop ruler. */
 export function waveformSeekTime(element: HTMLElement, clientX: number): number {
   const rect = element.getBoundingClientRect();
   const fraction = rect.width ? (clientX - rect.left) / rect.width : 0;

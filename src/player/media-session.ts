@@ -76,7 +76,7 @@ export function updateMediaSession(time: PlayerTime, force = false): void {
     media.setPositionState({
       duration: time.duration,
       position: Math.min(time.position, time.duration),
-      playbackRate: 1,
+      playbackRate: time.rate,
     });
   } catch {
     // An invalid state is ignored rather than breaking the player.

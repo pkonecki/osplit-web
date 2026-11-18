@@ -59,6 +59,16 @@ test("separates and plays a clip without CSP violations", async ({ page }) => {
   await page.click('[data-action="play"]');
   await expect(page.locator('[data-action="play"]')).toHaveAttribute("aria-label", "Pause");
   await expect(page.locator(".waveform.drawn")).toHaveCount(5);
+  // A key shift loads the pitch shifter's module and its AudioWorklet.
+  await page.click('[data-action="key-step"][data-step="1"]');
+  await expect(page.locator("#key-value")).toHaveText("+1");
+  await expect.poll(() =>
+    page.evaluate(() =>
+      performance.getEntriesByType("resource")
+        .some((entry) => entry.name.includes("SignalsmithStretch"))
+    )
+  ).toBe(true);
+  await page.waitForTimeout(1000);
   expect(await violations()).toEqual([]);
 });
 

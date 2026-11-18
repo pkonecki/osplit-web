@@ -22,6 +22,9 @@
     <h2>URL download limitations</h2>
     <p>The browser yt-dlp runtime requires JavaScript Promise Integration and a network connection. Browser-only retrieval is subject to CORS and site restrictions; YouTube and many providers may fail. OSplit does not use a proxy or send media to a processing server. Importing a local audio file is the reliable alternative.</p>
     <p>yt-dlp browser runtime prerequisites: Chrome 137+, Firefox 153+, or Safari 27+. For privacy and security, downloaded runtime updates are checked against the SHA-256 digest published by PyPI.</p>
+    <h2>Speed, key and loop</h2>
+    <p>The player can change the speed (50–150%) and key (±12 semitones) of a project and repeat an A–B loop. Key and speed changes use the Signalsmith Stretch pitch shifter (MIT), an AudioWorklet loaded on first use; it adds about 120 ms of delay. Loops are seamless with decoded playback; with streaming playback, used for long tracks on low-memory devices, the jump back to the loop start leaves a short gap.</p>
+    <p>Shortcuts: <code>-</code>/<code>=</code> speed, <code>,</code>/<code>.</code> key, <code>0</code> resets both, <code>[</code>/<code>]</code> set the loop start and end at the playhead, <code>L</code> turns the loop on or off and <code>Shift+L</code> clears it.</p>
     <h2>Storage and privacy</h2>
     <p>All projects are scoped to this browser profile and device. Clearing site data removes them. OSplit asks the browser to preserve its storage when supported, but browser quota and eviction policies still apply. Stems are stored as lossless FLAC, typically about half the size of WAV. Exports are FLAC by default, or WAV when chosen in the mixer, and are saved through your browser's download handling.</p>
   </body>

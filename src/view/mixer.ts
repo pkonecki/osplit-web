@@ -1,8 +1,10 @@
-import { exportFormat } from "../export";
+import { exportAppliesPractice, exportFormat } from "../export";
+import { isNeutral } from "../practice";
 import { soloStems, stemVolume } from "../mixing";
 import { playerTime } from "../player";
 import { type Project, STEM_LABELS, STEMS } from "../types";
 import { formatTime } from "./format";
+import { loopRulerMarkup, practiceMarkup } from "./practice";
 import { updatePlayheads, waveformMarkup } from "./waveforms";
 
 export function renderMixer(project: Project): string {
@@ -17,6 +19,11 @@ export function renderMixer(project: Project): string {
             <option value="flac" ${format === "flac" ? "selected" : ""}>FLAC · smaller, lossless</option>
             <option value="wav" ${format === "wav" ? "selected" : ""}>WAV · most compatible</option>
           </select>
+          <label class="check-row export-practice" ${
+    isNeutral(project) ? "hidden" : ""
+  }><input type="checkbox" data-action="export-practice" ${
+    exportAppliesPractice() ? "checked" : ""
+  } /> Mix with speed, key &amp; loop</label>
           <button class="button outline" data-action="export-mix">Export full mix</button>
           <button class="button outline" data-action="export-all">Export all (zip)</button>
         </div>
@@ -34,6 +41,8 @@ export function renderMixer(project: Project): string {
   }</span><span id="total-time">${formatTime(time.duration)}</span></div>
         </div>
       </div>
+      ${practiceMarkup(project)}
+      ${loopRulerMarkup()}
       <div class="stem-list">
         ${
     STEMS.filter((stem) => project.completedStems.includes(stem)).map((
