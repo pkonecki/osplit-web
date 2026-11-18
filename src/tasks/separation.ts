@@ -15,6 +15,7 @@ import { completeSeparation, getSource, updateProjectTask } from "../storage";
 import type { Project, Stem } from "../types";
 import { updateProgressDisplay } from "../view/detail";
 import { describeError, workerCrash } from "../view/format";
+import { analyzeProject, forgetAnalysis } from "./analysis";
 import { progressPersister } from "./progress";
 import { acquireWakeLock, releaseWakeLock } from "./wake-lock";
 
@@ -113,6 +114,9 @@ export async function separateProject(project: Project): Promise<void> {
     );
     state.progressLabel = "Separation complete";
     if (state.screenMessage === LONG_TRACK_WARNING) state.screenMessage = "";
+    // New stems: find their beats (in the background; never fails the project).
+    forgetAnalysis(project.id);
+    void analyzeProject(state.selectedProject);
   } catch (error) {
     const cancelled = error instanceof DOMException &&
       error.name === "AbortError";

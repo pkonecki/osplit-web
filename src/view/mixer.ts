@@ -2,7 +2,8 @@ import { exportAppliesPractice, exportFormat } from "../export";
 import { isNeutral } from "../practice";
 import { soloStems, stemVolume } from "../mixing";
 import { playerTime } from "../player";
-import { type Project, STEM_LABELS, STEMS } from "../types";
+import { projectGrid } from "../tasks/analysis";
+import { DEFAULT_CLICK_VOLUME, type Project, STEM_LABELS, STEMS } from "../types";
 import { formatTime } from "./format";
 import { loopRulerMarkup, practiceMarkup } from "./practice";
 import { updatePlayheads, waveformMarkup } from "./waveforms";
@@ -74,8 +75,29 @@ export function renderMixer(project: Project): string {
           </div>
         `).join("")
   }
+        ${projectGrid(project.id) ? clickRowMarkup(project) : ""}
       </div>
     </section>
+  `;
+}
+
+/** The click track's mixer row: muted (off) until turned on. */
+function clickRowMarkup(project: Project): string {
+  const on = project.clickOn === true;
+  const soloed = soloStems(project).includes("click");
+  return `
+          <div class="stem-control click-row" tabindex="0" data-stem-row="click" aria-label="Click (C or M to turn on or off, S to solo)">
+            <span class="stem-label">Click</span>
+            <input type="range" min="0" max="1" step="0.01" value="${
+    project.clickVolume ?? DEFAULT_CLICK_VOLUME
+  }" data-action="volume" data-stem="click" aria-label="Click volume" ${on ? "" : "disabled"} />
+            <button class="solo-button ${soloed ? "soloed" : ""}" data-action="solo" data-stem="click" aria-pressed="${soloed}" aria-label="Solo Click">S</button>
+            <button class="mute-button ${on ? "" : "muted"}" data-action="mute" data-stem="click" aria-label="${
+    on ? "Mute" : "Unmute"
+  } Click">${on ? "◖))" : "◖×"}</button>
+            <button class="button text-button" data-action="export-stem" data-stem="click">Export</button>
+            ${waveformMarkup("click", stemVolume(project, "click") === 0)}
+          </div>
   `;
 }
 

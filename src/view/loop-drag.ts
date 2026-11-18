@@ -6,7 +6,7 @@ import { waveformSeekTime } from "./waveforms";
  * Pointer gestures for the loop: dragging across a waveform or the loop
  * ruler draws a new loop, and dragging a handle moves that edge. A press
  * without movement stays a click (which seeks). Works the same for mouse,
- * pen and touch.
+ * pen and touch. Positions snap to the beat grid when there is one.
  */
 
 export interface LoopDragCallbacks {
@@ -16,6 +16,8 @@ export interface LoopDragCallbacks {
   preview(loop: ProjectLoop): void;
   /** The drag ended on `loop`: save it. */
   commit(loop: ProjectLoop): void;
+  /** Moves a dragged position onto the beat grid (modifier keys may opt out). */
+  snap(seconds: number, event: PointerEvent): number;
 }
 
 /** Movement (CSS pixels) that turns a press into a drag. */
@@ -59,7 +61,7 @@ export function installLoopDrag(root: HTMLElement, callbacks: LoopDragCallbacks)
       drag = {
         kind: "create",
         element: area,
-        anchor: waveformSeekTime(area, event.clientX),
+        anchor: callbacks.snap(waveformSeekTime(area, event.clientX), event),
         startX: event.clientX,
         moved: false,
       };
@@ -69,19 +71,23 @@ export function installLoopDrag(root: HTMLElement, callbacks: LoopDragCallbacks)
   root.addEventListener("pointermove", (event) => {
     if (!drag) return;
     const duration = callbacks.duration();
-    const time = waveformSeekTime(drag.element, event.clientX);
+    const raw = waveformSeekTime(drag.element, event.clientX);
+    const snapped = callbacks.snap(raw, event);
     if (drag.kind === "create") {
       if (!drag.moved) {
         if (Math.abs(event.clientX - drag.startX) < DRAG_THRESHOLD) return;
         drag.moved = true;
         drag.element.setPointerCapture(event.pointerId);
       }
+      // Both ends on the same grid line: follow the pointer instead.
+      const time = Math.abs(snapped - drag.anchor) < MIN_LOOP_SECONDS ? raw : snapped;
       const region = normalizeLoop(drag.anchor, time, duration);
       if (!region) return;
       current = { ...region, enabled: true };
     } else {
       if (!current) return;
       drag.moved = true;
+      const time = snapped;
       const start = drag.edge === "start"
         ? Math.min(time, current.end - MIN_LOOP_SECONDS)
         : current.start;

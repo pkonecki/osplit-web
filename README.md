@@ -119,6 +119,37 @@ low-memory devices) lets the browser keep the pitch and only shifts the key.
 Loops are seamless with decoded playback; with streaming playback, the jump
 back to the loop start leaves a short gap.
 
+### Tempo, beat grid and click
+
+After each separation, OSplit finds the tempo, the beats and the bar starts
+in the stems, on the device, in a worker (a few seconds for a 4-minute track).
+Projects separated before this ask for it with **Find tempo** in the practice
+bar. The analysis is stored with the project and redone when its stems
+change.
+
+- **Tempo chip:** shows the tempo, and the tempo heard at the current speed
+  (for example "♩ 120 → 102 BPM" at 85%). It opens a panel to correct the
+  grid: ×2 / ÷2, 3 or 4 beats per bar, move the bar start a beat earlier or
+  later, tap the tempo, undo the corrections, or analyze again.
+- **Beat grid:** beats and bar lines are drawn over the waveforms, with bar
+  numbers in the strip above the stems.
+- **Snapping and bar loops:** dragged loop edges snap to the nearest beat
+  (hold Alt for bars, Shift for no snapping). The *Bars* buttons loop 1, 2 or
+  4 bars from the bar at the playhead.
+- **Click:** a click track on every beat, accented on bar starts, with its own
+  row in the mixer (volume, solo, on/off; off by default). It follows the
+  speed and the loop, is added to the exported mix when it is heard, and goes
+  in the zip as `<name>-click.<format>`.
+
+Accuracy: the analysis follows the drum stem (all stems when the drums are
+silent) and tracks tempo drift in live playing. Half or double tempo errors
+happen; ×2 / ÷2 is one click away. Music without a steady pulse shows *No
+beat found*, or a low-confidence grid that loops don't snap to; tap tempo
+replaces it with an even grid. With decoded playback the click is
+sample-accurate; with streaming playback it can be some 30 ms off, as the
+position of streaming audio is reported less precisely. A browser tab in the
+background can delay or drop clicks.
+
 Keyboard shortcuts on a project page (not while typing in a field):
 
 | Key | Action |
@@ -133,6 +164,9 @@ Keyboard shortcuts on a project page (not while typing in a field):
 | `[` / `]` | Set the loop start / end at the playhead |
 | L / Shift+L | Turn the loop on or off / clear it |
 | ← / → on a loop handle | Move it 0.1 s (Shift: 1 s) |
+| B | Loop the current bar; again to double the loop |
+| C | Turn the click on or off |
+| T | Tap the tempo (with the tempo panel open) |
 
 ## Installing the app
 

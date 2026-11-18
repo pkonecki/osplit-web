@@ -1,8 +1,10 @@
+import type { BeatGrid } from "./analysis/grid";
 import { stemFrameCount } from "./audio-format";
 import { stemVolume } from "./mixing";
 import { playbackEngineFor } from "./memory";
 import { BufferEngine } from "./player/buffer-engine";
 import type { PlaybackEngine, PlayerTime, StemAudio } from "./player/engine";
+import { ClickScheduler } from "./player/click";
 import { MediaEngine } from "./player/media-engine";
 import { stopMediaSession } from "./player/media-session";
 import {
@@ -10,9 +12,15 @@ import {
   PITCH_SHIFT_UNAVAILABLE,
   type PitchShifter,
 } from "./player/pitch-shifter";
-import { activeLoop, busTranspose, projectSemitones, projectSpeed } from "./practice";
+import {
+  activeLoop,
+  busTranspose,
+  type LoopRegion,
+  projectSemitones,
+  projectSpeed,
+} from "./practice";
 import { getStem } from "./storage";
-import { type Project, type Stem, STEM_LABELS } from "./types";
+import { type Project, type Stem, STEM_LABELS, type Track } from "./types";
 
 /**
  * The project player. Stems play through one gain node each, from decoded
@@ -40,6 +48,15 @@ let routedShifter: PitchShifter | null = null;
 /** Increases on every routing, so a superseded one (still loading) is dropped. */
 let routeToken = 0;
 let progressTimer: number | undefined;
+/** The click track, scheduled against the playing engine. */
+let click: ClickScheduler | undefined;
+let clickGrid: BeatGrid | null = null;
+/** The project `clickGrid` belongs to. */
+let clickGridProject: string | null = null;
+/** The loop now applied, which the click follows too. */
+let appliedLoop: LoopRegion | null = null;
+/** Lead before decoded sources start (BufferEngine's START_LEAD_SECONDS). */
+const BUFFER_START_LEAD = 0.05;
 let onTick: () => void = () => {};
 let onLoaded: (project: Project) => void = () => {};
 
@@ -98,6 +115,11 @@ export async function preparePlayers(project: Project): Promise<void> {
       bus = new GainNode(context);
       bus.connect(context.destination);
     }
+    click ??= new ClickScheduler(context, context.destination, () => {
+      const time = engine?.time() ??
+        { position: 0, duration: 0, playing: false, rate: 1 };
+      return { ...time, loop: appliedLoop };
+    });
     const kind = playbackEngineFor(
       await stemFrameCount(stems[0].blob),
       stems.length,
@@ -122,9 +144,13 @@ export async function preparePlayers(project: Project): Promise<void> {
     for (const stem of project.completedStems) {
       engine.setGain(stem, stemVolume(project, stem));
     }
+    click?.setLevel(stemVolume(project, "click"));
+    click?.setGrid(clickGridProject === project.id ? clickGrid : null);
     const practice = applyPractice(project);
     progressTimer = window.setInterval(() => {
       engine?.tick();
+      // Starts or stops the click with playback (also at the track's end).
+      click?.update();
       onTick();
     }, 250);
     onLoaded(project);
@@ -142,6 +168,8 @@ export function releasePlayers(): void {
   progressTimer = undefined;
   engine?.release();
   engine = null;
+  click?.setGrid(null);
+  appliedLoop = null;
   routeToken++;
   playerProjectId = null;
   loading = false;
@@ -151,12 +179,29 @@ export function releasePlayers(): void {
 
 export async function pauseAll(): Promise<void> {
   engine?.pause();
+  click?.update();
 }
 
 export { stemVolume };
 
-export function applyStemVolume(project: Project, stem: Stem): void {
-  engine?.setGain(stem, stemVolume(project, stem));
+export function applyStemVolume(project: Project, track: Track): void {
+  if (track === "click") click?.setLevel(stemVolume(project, "click"));
+  else engine?.setGain(track, stemVolume(project, track));
+}
+
+/** The beat grid of `projectId` the click follows, or null for no click. */
+export function setClickGrid(projectId: string, grid: BeatGrid | null): void {
+  if (grid === clickGrid && projectId === clickGridProject) return;
+  clickGrid = grid;
+  clickGridProject = projectId;
+  if (playerProjectId === projectId) click?.setGrid(grid);
+}
+
+/** Restarts the click after the position jumped (seek, play, loop). */
+function restartClick(): void {
+  if (!engine || !click) return;
+  const delay = engine.kind === "buffer" ? BUFFER_START_LEAD : 0;
+  click.restart(delay + (routedShifter?.latency ?? 0));
 }
 
 export async function playAll(project: Project): Promise<void> {
@@ -167,17 +212,25 @@ export async function playAll(project: Project): Promise<void> {
         : "Separate stems before using the project player.",
     );
   }
-  if (!project.completedStems.some((stem) => stemVolume(project, stem) > 0)) {
+  const clickHeard = clickGridProject === project.id && clickGrid !== null &&
+    stemVolume(project, "click") > 0;
+  if (
+    !clickHeard &&
+    !project.completedStems.some((stem) => stemVolume(project, stem) > 0)
+  ) {
     throw new Error("Unmute at least one stem before playing.");
   }
   for (const stem of project.completedStems) {
     engine.setGain(stem, stemVolume(project, stem));
   }
+  click?.setLevel(stemVolume(project, "click"));
   await engine.play();
+  restartClick();
 }
 
 export function seekAll(seconds: number): void {
   engine?.seek(seconds);
+  restartClick();
   onTick();
 }
 
@@ -192,12 +245,16 @@ export async function applyPractice(project: Project): Promise<void> {
   if (!current) return;
   const speed = projectSpeed(project);
   current.setRate(speed);
-  current.setLoop(activeLoop(project));
+  appliedLoop = activeLoop(project);
+  current.setLoop(appliedLoop);
+  // The click's lookahead was computed at the old speed and loop.
+  click?.restart();
   const transpose = busTranspose(current.kind, speed, projectSemitones(project));
   const token = ++routeToken;
   if (transpose === 0) {
     routeBus(null);
     current.setOutputDelay(0);
+    click?.restart();
     return;
   }
   let next: PitchShifter;
@@ -217,6 +274,7 @@ export async function applyPractice(project: Project): Promise<void> {
   void next.setSemitones(transpose);
   routeBus(next);
   current.setOutputDelay(next.latency);
+  click?.restart();
 }
 
 /** Sends the bus to the speakers directly, or through `next`. */

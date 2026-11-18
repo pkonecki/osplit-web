@@ -1,24 +1,28 @@
-import type { Project, Stem } from "./types";
+import { DEFAULT_CLICK_VOLUME, type Project, type Track } from "./types";
 
-/** Soloed stems; projects saved before solo existed have none. */
-export function soloStems(project: Project): Stem[] {
+/** Soloed rows; projects saved before solo existed have none. */
+export function soloStems(project: Project): Track[] {
   return project.soloStems ?? [];
 }
 
 /**
- * A stem's level in the mix, as on a mixing desk: when any stem is soloed,
- * only soloed stems are heard; a muted stem stays silent; otherwise the
- * stem's volume applies. Playback and the exported mix both use this rule.
+ * A row's level in the mix, as on a mixing desk: when any row is soloed,
+ * only soloed rows are heard; a muted row stays silent; otherwise the row's
+ * volume applies. The click row is muted until turned on. Playback and the
+ * exported mix both use this rule.
  */
-export function stemVolume(project: Project, stem: Stem): number {
+export function stemVolume(project: Project, track: Track): number {
   const solo = soloStems(project);
-  if (solo.length > 0 && !solo.includes(stem)) return 0;
-  return project.mutedStems.includes(stem) ? 0 : project.volumes[stem];
+  if (solo.length > 0 && !solo.includes(track)) return 0;
+  if (track === "click") {
+    return project.clickOn ? project.clickVolume ?? DEFAULT_CLICK_VOLUME : 0;
+  }
+  return project.mutedStems.includes(track) ? 0 : project.volumes[track];
 }
 
-/** Adds `stem` to `list` or removes it. */
-export function toggleStem(list: Stem[], stem: Stem): Stem[] {
-  return list.includes(stem)
-    ? list.filter((item) => item !== stem)
-    : [...list, stem];
+/** Adds `item` to `list` or removes it. */
+export function toggleStem<T extends Track>(list: T[], item: T): T[] {
+  return list.includes(item)
+    ? list.filter((entry) => entry !== item)
+    : [...list, item];
 }

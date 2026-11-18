@@ -1,4 +1,5 @@
 import type { Quality, Stem } from "./types";
+import type { RhythmResult } from "./analysis/rhythm";
 
 /** Page → inference worker. */
 export type InferenceRequest =
@@ -28,4 +29,19 @@ export type UrlResponse =
   | { type: "progress"; id: string; progress: number; stage: string }
   | { type: "downloaded"; id: string; name: string; blob: Blob }
   | { type: "updated"; id: string; version: string }
+  | { type: "error"; id: string; message: string };
+
+/** Page → analysis worker: mono signals at ANALYSIS_RATE (src/analysis/onset.ts). */
+export type AnalysisRequest = {
+  type: "analyze";
+  id: string;
+  source: Float32Array;
+  sourceName: "drums" | "mix";
+  bass?: Float32Array;
+};
+
+/** Analysis worker → page. */
+export type AnalysisResponse =
+  | { type: "progress"; id: string; stage: string; progress: number }
+  | { type: "complete"; id: string; result: RhythmResult }
   | { type: "error"; id: string; message: string };

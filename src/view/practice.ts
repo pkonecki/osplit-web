@@ -11,7 +11,9 @@ import {
   projectSemitones,
   projectSpeed,
 } from "../practice";
+import { projectGrid } from "../tasks/analysis";
 import type { Project } from "../types";
+import { tempoChipMarkup, tempoPanelMarkup, updateTempoDisplay } from "./tempo";
 
 /**
  * The practice bar (speed, key, loop) and the loop ruler above the stems.
@@ -64,10 +66,22 @@ export function practiceMarkup(project: Project): string {
     loop ? "" : "hidden"
   }>×</button>
       </div>
+      <div class="practice-group bars-group" role="group" aria-label="Loop bars from the playhead">
+        <span class="practice-label">Bars</span>
+        ${
+    [1, 2, 4].map((bars) =>
+      `<button class="step-button" data-action="loop-bars" data-bars="${bars}" aria-label="Loop ${bars} bar${
+        bars > 1 ? "s" : ""
+      } from the playhead${bars === 1 ? " (B)" : ""}" ${projectGrid(project.id) ? "" : "disabled"}>${bars}</button>`
+    ).join("")
+  }
+      </div>
+      ${tempoChipMarkup()}
       <button class="button text-button practice-reset" data-action="practice-reset" ${
     isNeutral(project) ? "hidden" : ""
   }>Reset</button>
     </div>
+    ${tempoPanelMarkup()}
   `;
 }
 
@@ -75,6 +89,7 @@ export function practiceMarkup(project: Project): string {
 export function loopRulerMarkup(): string {
   return `
     <div class="loop-ruler" data-action="waveform-seek" title="Drag to set a loop">
+      <canvas class="grid-canvas"></canvas>
       <span class="loop-band" hidden></span>
       <span class="playhead"></span>
       <span class="loop-handle" data-loop-handle="start" role="slider" tabindex="0" aria-label="Loop start" hidden></span>
@@ -109,6 +124,11 @@ export function updatePracticeDisplay(project: Project): void {
   setHidden('[data-action="loop-clear"]', !project.loop);
   setHidden('[data-action="practice-reset"]', isNeutral(project));
   setHidden(".export-practice", isNeutral(project));
+  const grid = projectGrid(project.id);
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-action="loop-bars"]')) {
+    button.disabled = !grid;
+  }
+  updateTempoDisplay(project);
   updateLoopDisplay(project);
 }
 

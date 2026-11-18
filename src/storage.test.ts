@@ -6,6 +6,7 @@ import {
   completeSeparation,
   deleteModelVariants,
   deleteProject,
+  getAnalysis,
   getModel,
   getPeaks,
   getSource,
@@ -13,13 +14,29 @@ import {
   latestModelVariant,
   listProjects,
   MIGRATIONS,
+  putAnalysis,
   putModel,
   putPeaks,
   putStem,
   replaceSource,
   saveProject,
 } from "./storage";
-import { newProject, STEMS } from "./types";
+import { type AnalysisRecord, newProject, STEMS } from "./types";
+
+function analysis(projectId: string): AnalysisRecord {
+  return {
+    projectId,
+    algorithmVersion: 1,
+    source: "drums",
+    duration: 10,
+    bpm: 120,
+    bpmConfidence: 0.9,
+    alternativeBpm: 60,
+    beats: Float32Array.from([0.5, 1, 1.5, 2]),
+    beatsPerBar: 4,
+    firstDownbeatIndex: 0,
+  };
+}
 
 beforeEach(async () => {
   await closeDatabaseForTests();
@@ -45,7 +62,7 @@ describe("schema migrations", () => {
     });
     expect(db.version).toBe(MIGRATIONS.length);
     expect([...db.objectStoreNames].sort()).toEqual(
-      ["models", "peaks", "projects", "sources", "stems"],
+      ["analysis", "models", "peaks", "projects", "sources", "stems"],
     );
     db.close();
   });
@@ -74,6 +91,37 @@ describe("schema migrations", () => {
     ]);
     // Migration 2 added the waveform store to the existing database.
     expect(await getPeaks(legacy.id)).toEqual({});
+  });
+
+  it("adds the analysis store to an existing version-2 database", async () => {
+    const legacy = newProject("from v2");
+    await new Promise<void>((resolve) => {
+      const request = indexedDB.open("osplit-pwa", 2);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        for (const [name, keyPath] of [
+          ["projects", "id"],
+          ["sources", "id"],
+          ["stems", "id"],
+          ["models", "key"],
+          ["peaks", "id"],
+        ]) db.createObjectStore(name, { keyPath });
+        request.transaction!.objectStore("projects").put(legacy);
+        request.transaction!.objectStore("peaks").put({
+          id: `${legacy.id}:vocals`,
+          peaks: new Float32Array([0.5]),
+        });
+      };
+      request.onsuccess = () => {
+        request.result.close();
+        resolve();
+      };
+    });
+    expect((await listProjects()).map((project) => project.name)).toEqual(["from v2"]);
+    expect(Object.keys(await getPeaks(legacy.id))).toEqual(["vocals"]);
+    expect(await getAnalysis(legacy.id)).toBeUndefined();
+    expect(await putAnalysis(analysis(legacy.id))).toBe(true);
+    expect((await getAnalysis(legacy.id))?.bpm).toBe(120);
   });
 
   it("reports a newer database version from another tab clearly", async () => {
@@ -193,6 +241,33 @@ describe("project stems", () => {
     await putStem(long.id, "bass", new Blob(["long"]));
     await deleteProject(short.id);
     expect(await text((await getStem(long.id, "bass"))?.blob)).toBe("long");
+  });
+});
+
+describe("rhythm analysis", () => {
+  it("is deleted with its project", async () => {
+    const project = await saveProject(newProject("a"));
+    const other = await saveProject(newProject("b"));
+    await putAnalysis(analysis(project.id));
+    await putAnalysis(analysis(other.id));
+    await deleteProject(project.id);
+    expect(await getAnalysis(project.id)).toBeUndefined();
+    expect(await getAnalysis(other.id)).toBeDefined();
+  });
+
+  it("is not saved for a project deleted meanwhile", async () => {
+    expect(await putAnalysis(analysis("gone"))).toBe(false);
+    expect(await getAnalysis("gone")).toBeUndefined();
+  });
+
+  it("is cleared when the stems change", async () => {
+    const project = await saveProject(newProject("a"));
+    await putAnalysis(analysis(project.id));
+    await completeSeparation(project.id, stems("again"));
+    expect(await getAnalysis(project.id)).toBeUndefined();
+    await putAnalysis(analysis(project.id));
+    await replaceSource(project, new Blob(["new"]), "new.wav");
+    expect(await getAnalysis(project.id)).toBeUndefined();
   });
 });
 
