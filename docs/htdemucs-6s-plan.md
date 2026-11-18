@@ -1,12 +1,14 @@
 # Plan: add the Demucs v4 6-stem model (`htdemucs_6s`)
 
-Status: proposal, not started.
+Status: in progress. Step 0 done (see Step 0 results).
 
 ## Decisions
 
 - **One Demucs variant: `htdemucs_6s` in FP16.** No FP32 and no int8 file.
-- **Demucs runs on WebGPU only.** Without WebGPU, the app keeps using Spleeter,
+- **Demucs runs on WebGPU only, and needs the `shader-f16` feature** (FP16
+  shaders; see Step 0 results). Without them, the app keeps using Spleeter,
   which stays the model for slow devices.
+- **If FP16 fails the quality check on real GPUs, ship FP32 instead** (decided).
 - **The UI shows whether WebGPU is available** and says that Demucs is slower
   than Spleeter.
 
@@ -141,6 +143,50 @@ model cards, not verified):
 **Gate:** if the browser test fails, stop or change the export before going
 further.
 
+### Step 0 results (November 2026)
+
+Export: `scripts/export-htdemucs.py` (demucs 4.0.1, torch 2.6.0 CPU, legacy
+exporter, opset 17), checkpoint `5c90dfd2-34c22ccb.th` (SHA-256 starts with
+`34c22ccb`, checked by the script).
+
+- **Sizes:** FP32 114.6 MB, FP16 57.8 MB (about 28.6 M parameters; the earlier
+  ~42 M guess was for the 4-stem htdemucs).
+- **Normalization moved out of the graph.** Plain FP16 conversion produced
+  NaN: each branch's input normalization computes a standard deviation whose
+  element count (4·2048·336 = 2.75 M) is cast to FP16 and overflows (max
+  65,504). The graph now takes normalized inputs and returns normalized
+  outputs; TypeScript computes mean and standard deviation (Bessel's
+  correction, `1e-5` added to the divisor) per segment and scales back.
+- **Converter:** `onnxruntime.transformers.float16`
+  (`keep_io_types=True`); `onnxconverter_common`'s left mismatched `Cast`
+  types. No op had to stay in FP32.
+- **Correctness (FP32, CPU):** NumPy STFT and inverse STFT match
+  `HTDemucs._spec`/`_ispec` to 1e-7. The whole NumPy pipeline with the ONNX
+  graph matches `demucs.apply_model` (split, overlap 0.25, no shifts) at
+  84.8 dB SNR on 95 s of music.
+- **FP16 vs FP32 (ONNX Runtime CPU):** 56 dB SNR over all stems (piano lowest
+  at 45 dB, others 54–61 dB).
+- **SDR against ground truth** (14 MUSDB18 7-second preview tracks, 95 s,
+  global SDR, `other` = other + guitar + piano): FP32 and FP16 identical to
+  two decimals: drums 7.90, bass 6.04, other 4.10, vocals 8.92, average
+  6.74 dB. (Lower than published figures: short, compressed previews and a
+  plain SDR, not museval.)
+- **WebGPU (headless Chromium, SwiftShader adapter):** the FP32 graph runs and
+  gives finite output; only shape ops go to the CPU, as usual. The FP16 graph
+  fails to compile without `shader-f16` ("'f16' type used without 'f16'
+  extension enabled"), so ONNX Runtime does not fall back by itself: the app
+  must check `adapter.features.has("shader-f16")` before offering Demucs.
+- **Not yet measured:** FP16 numerics and speed on a real GPU (CPU FP16 may
+  accumulate in FP32, WebGPU shaders may not). SwiftShader has no
+  `shader-f16` and is far too slow for timings (about 9 min per segment for
+  FP32). Check on a real WebGPU device before release: separate a track with
+  Demucs and compare its stems with the FP32 CPU reference from the export
+  script (`--audio`); if they differ audibly, ship FP32 (decided).
+
+Fixtures for the TypeScript port: `src/__fixtures__/demucs/stft.json` (STFT
+values, inverse STFT of a sparse spectrum, and the whole pipeline with a
+stand-in for the network), written by the export script's `write_fixtures`.
+
 ## Step 1 – Models and stems as data, not constants
 
 - `src/types.ts`:
@@ -203,8 +249,8 @@ further.
 ## Step 4 – UI and memory estimate
 
 - **WebGPU detection on the main thread.** New `src/gpu.ts` with
-  `detectWebGpu(): Promise<boolean>` (`navigator.gpu?.requestAdapter()`,
-  cached). The worker's `preferredProvider` stays as it is; the main thread
+  `detectWebGpu()` returning whether an adapter exists and whether it has
+  `shader-f16` (`navigator.gpu?.requestAdapter()`, cached). The worker's `preferredProvider` stays as it is; the main thread
   needs its own answer to build the picker before any separation. The worker
   reports the provider it actually used in its progress messages, so a
   WebGPU failure at run time shows up in the UI too.
@@ -212,15 +258,18 @@ further.
   - available: "WebGPU: available", so the user knows separation runs on the
     GPU;
   - not available: "WebGPU: not available – separation runs on the CPU", and
-    Demucs is unavailable.
+    Demucs is unavailable;
+  - available without `shader-f16`: "WebGPU: available, without FP16 support",
+    and Demucs is unavailable.
 - **Model picker:**
   - "Spleeter · 5 stems · fast", with its FP16/FP32 quality buttons.
   - "Demucs v4 · 6 stems · better quality, slower", single quality, so no
     quality buttons. Its hint says separation takes longer than with Spleeter
     (with the measured ratio from Step 0, e.g. "about N× longer"), and that its
     piano stem is weak (the Demucs authors say so).
-  - Without WebGPU, the Demucs option is shown disabled with "Needs WebGPU",
-    rather than hidden, so users learn that a better model exists.
+  - Without WebGPU or `shader-f16`, the Demucs option is shown disabled with
+    "Needs WebGPU with FP16 support", rather than hidden, so users learn that
+    a better model exists.
   - Each option shows its download size. Changing the model saves the project,
     like the quality switch in `src/main.ts`.
   - Default for new projects: Demucs with WebGPU, Spleeter without. A project
