@@ -11,6 +11,8 @@ export const state = {
   screenMessage: "",
   /** True while this tab runs a separation, URL download or yt-dlp update. */
   working: false,
+  /** Where the running separation runs, once the worker reports it. */
+  provider: null as "webgpu" | "wasm" | null,
   /** What the shared hidden file input was opened for. */
   fileDialogTarget: "none" as "source" | "none",
 };

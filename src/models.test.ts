@@ -18,6 +18,7 @@ import {
 } from "./storage";
 
 const KEY = "fp16/vocals.fp16.onnx";
+const FILE = { key: KEY, label: "vocals" };
 const MODEL = new TextEncoder().encode("pretend this is an ONNX model");
 
 async function entryFor(bytes: Uint8Array) {
@@ -91,7 +92,7 @@ describe("loadModel", () => {
     const server = fakeServer({ [KEY]: entry }, { [KEY]: MODEL });
     const progress: number[] = [];
 
-    const bytes = await loadModel("fp16", "vocals", {
+    const bytes = await loadModel(FILE, {
       ...noProgress,
       onProgress: (fraction) => progress.push(fraction),
       fetchImpl: server.fetchImpl,
@@ -104,7 +105,7 @@ describe("loadModel", () => {
     // A second load comes from the cache: only the model list is fetched.
     const before = server.requests.length;
     resetModelManifest();
-    await loadModel("fp16", "vocals", { ...noProgress, fetchImpl: server.fetchImpl });
+    await loadModel(FILE, { ...noProgress, fetchImpl: server.fetchImpl });
     expect(server.requests.slice(before)).toEqual([
       expect.stringMatching(/models\.json$/),
     ]);
@@ -116,7 +117,7 @@ describe("loadModel", () => {
     corrupted[0] ^= 0xff;
     const server = fakeServer({ [KEY]: entry }, { [KEY]: corrupted });
     await expect(
-      loadModel("fp16", "vocals", { ...noProgress, fetchImpl: server.fetchImpl }),
+      loadModel(FILE, { ...noProgress, fetchImpl: server.fetchImpl }),
     ).rejects.toThrow(/corrupted/);
     expect(await latestModelVariant(KEY)).toBeUndefined();
   });
@@ -127,7 +128,7 @@ describe("loadModel", () => {
     const entry = await entryFor(MODEL);
     const server = fakeServer({ [KEY]: entry }, { [KEY]: MODEL });
 
-    await loadModel("fp16", "vocals", { ...noProgress, fetchImpl: server.fetchImpl });
+    await loadModel(FILE, { ...noProgress, fetchImpl: server.fetchImpl });
 
     expect(await getModel(KEY)).toBeUndefined();
     expect(await getModel(`${KEY}@old`)).toBeUndefined();
@@ -137,11 +138,11 @@ describe("loadModel", () => {
   it("uses the cached copy when the model list cannot be fetched", async () => {
     const entry = await entryFor(MODEL);
     const server = fakeServer({ [KEY]: entry }, { [KEY]: MODEL });
-    await loadModel("fp16", "vocals", { ...noProgress, fetchImpl: server.fetchImpl });
+    await loadModel(FILE, { ...noProgress, fetchImpl: server.fetchImpl });
 
     resetModelManifest();
     server.goOffline();
-    const bytes = await loadModel("fp16", "vocals", {
+    const bytes = await loadModel(FILE, {
       ...noProgress,
       fetchImpl: server.fetchImpl,
     });
@@ -152,7 +153,7 @@ describe("loadModel", () => {
     const server = fakeServer({}, {});
     server.goOffline();
     await expect(
-      loadModel("fp16", "vocals", { ...noProgress, fetchImpl: server.fetchImpl }),
+      loadModel(FILE, { ...noProgress, fetchImpl: server.fetchImpl }),
     ).rejects.toThrow(/Failed to fetch/);
   });
 
@@ -161,7 +162,7 @@ describe("loadModel", () => {
     const server = fakeServer({ [KEY]: entry }, { [KEY]: MODEL });
     let checks = 0;
     await expect(
-      loadModel("fp16", "vocals", {
+      loadModel(FILE, {
         onProgress: () => {},
         checkCancelled: () => {
           if (++checks > 1) throw new DOMException("cancelled", "AbortError");

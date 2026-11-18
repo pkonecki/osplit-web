@@ -1,20 +1,30 @@
-import type { Quality, Stem } from "./types";
+import type { ModelId, Quality, Stem } from "./types";
 import type { RhythmResult } from "./analysis/rhythm";
 
 /** Page → inference worker. */
 export type InferenceRequest =
-  | { type: "separate"; id: string; quality: Quality; samples: Float32Array }
+  | {
+    type: "separate";
+    id: string;
+    model: ModelId;
+    /** Spleeter's model files; Demucs has one quality. */
+    quality: Quality;
+    samples: Float32Array;
+  }
   | { type: "cancel"; id: string };
 
 /** Inference worker → page. */
 export type InferenceResponse =
   | { type: "progress"; id: string; stage: string; progress: number }
+  /** Where the separation runs; sent again if it moves to the CPU. */
+  | { type: "provider"; id: string; provider: "webgpu" | "wasm" }
   | {
     type: "complete";
     id: string;
-    stems: Record<Stem, Blob>;
+    /** The model's stems. */
+    stems: Partial<Record<Stem, Blob>>;
     /** Waveform overview per stem (see src/peaks.ts). */
-    peaks: Record<Stem, Float32Array>;
+    peaks: Partial<Record<Stem, Float32Array>>;
   }
   | { type: "error"; id: string; message: string }
   | { type: "cancelled"; id: string };

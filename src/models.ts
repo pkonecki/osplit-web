@@ -5,7 +5,7 @@ import {
   latestModelVariant,
   putModel,
 } from "./storage";
-import type { Quality, Stem } from "./types";
+import { type ModelId, MODEL_STEMS, type Quality, type Stem } from "./types";
 
 /** Size and SHA-256 of one model file, from the build's models/models.json. */
 export interface ModelEntry {
@@ -18,10 +18,30 @@ export type ModelManifest = Record<string, ModelEntry>;
 
 export const MODEL_MANIFEST_PATH = "models/models.json";
 
-export function modelKey(quality: Quality, stem: Stem): string {
+export function spleeterKey(quality: Quality, stem: Stem): string {
   return quality === "fp16"
     ? `fp16/${stem}.fp16.onnx`
     : `fp32/${stem}.onnx`;
+}
+
+export const DEMUCS_KEY = "htdemucs_6s/htdemucs_6s.fp16.onnx";
+
+/** One model file to download, and what to call it in progress messages. */
+export interface ModelFile {
+  key: string;
+  label: string;
+}
+
+/**
+ * The files a separation downloads: Spleeter has one per stem and quality,
+ * Demucs a single FP16 file whatever the project's quality.
+ */
+export function modelFiles(model: ModelId, quality: Quality): ModelFile[] {
+  if (model === "htdemucs-6s") return [{ key: DEMUCS_KEY, label: "Demucs" }];
+  return MODEL_STEMS["spleeter-5"].map((stem) => ({
+    key: spleeterKey(quality, stem),
+    label: stem,
+  }));
 }
 
 /**
@@ -116,12 +136,11 @@ export interface LoadModelOptions {
  * caches it. Without network access, the most recently cached copy is used.
  */
 export async function loadModel(
-  quality: Quality,
-  stem: Stem,
+  file: ModelFile,
   options: LoadModelOptions,
 ): Promise<ArrayBuffer> {
   const fetchImpl = options.fetchImpl ?? fetch;
-  const key = modelKey(quality, stem);
+  const { key, label } = file;
 
   let manifest: ModelManifest;
   try {
@@ -141,10 +160,10 @@ export async function loadModel(
 
   const response = await fetchImpl(appUrl(`models/${key}`));
   if (!response.ok) {
-    throw new Error(`Could not download the ${stem} ${quality} model.`);
+    throw new Error(`Could not download the ${label} model.`);
   }
   const reader = response.body?.getReader();
-  if (!reader) throw new Error(`Could not read the ${stem} model download.`);
+  if (!reader) throw new Error(`Could not read the ${label} model download.`);
   const chunks: Uint8Array<ArrayBuffer>[] = [];
   let downloaded = 0;
   while (true) {
