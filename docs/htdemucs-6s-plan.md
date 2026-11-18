@@ -84,6 +84,26 @@ without WebGPU, and for a proper piano stem.
 
 ## Step 0 – Convert the model (main risk, do first)
 
+We export and convert the model ourselves, from the official checkpoint, with
+a script in this repo. Ready-made community ONNX files exist (below), but they
+are self-published and unaudited. Their export choices also differ: STFT
+inside or outside the graph, segment length, and FP16 weights versus FP16
+compute. A reproducible export that matches our TypeScript pipeline is easier
+to trust and test. Use them as references and as a benchmark, not as the
+shipped file.
+
+**Existing exports to learn from** (found November 2026, claims from their
+model cards, not verified):
+
+| Repo | What it is | Useful lesson |
+| --- | --- | --- |
+| [StemSplitio/htdemucs-6s-onnx](https://huggingface.co/StemSplitio/htdemucs-6s-onnx) (mirrors: adowu, Acapellas) | 6-stem, FP32 and `htdemucs_6s_fp16weights.onnx` | "FP16 weights": stored in FP16, computed in FP32. Smaller download, little runtime memory saving. |
+| [kramp/htdemucs-6s-webgpu-onnx](https://huggingface.co/kramp/htdemucs-6s-webgpu-onnx) | 6-stem, iSTFT inside the graph | A `ConstantOfShape` in the embedded inverse STFT does not run on ORT Web's WebGPU backend. Keeping the STFT outside avoids it. |
+| [monteslu/htdemucs-ft-webgpu](https://huggingface.co/monteslu/htdemucs-ft-webgpu), [monteslu/htdemucs-web-onnx](https://huggingface.co/monteslu/htdemucs-web-onnx) | 4-stem, built for ORT Web on WebGPU, mixed precision | Many Hub exports fail to load on WebGPU; the legacy `torch.onnx.export` (TorchScript, opset 17) works, while the dynamo exporter gave NaNs on WebGPU. |
+| [Andremi/audioweb-models](https://huggingface.co/Andremi/audioweb-models) | 6-stem FP16-weight files at 7.8 s and 3.9 s segments | A shorter segment is an option for low-memory devices. |
+| [demucs-onnx](https://pypi.org/project/demucs-onnx/) (PyPI) | Export tool for htdemucs, htdemucs_ft, htdemucs_6s | Reference export code. |
+| [timcsy/demucs-web](https://github.com/timcsy/demucs-web) | npm package, WebGPU and WASM, ~172 MB model | Needs cross-origin isolation, as our nginx build has. |
+
 1. Write `scripts/export-htdemucs.py`, pinned to `demucs==4.0.1` and the
    `htdemucs_6s` checkpoint (verify its hash).
    - Keep the STFT and inverse STFT out of the ONNX graph: torch's complex STFT
@@ -92,15 +112,21 @@ without WebGPU, and for a proper piano stem.
      imaginary parts as separate channels `[1,4,2048,336]`.
    - Graph outputs: waveform branch `[1,6,2,343980]` and spectral branch
      `[1,6,4,2048,336]`.
-   - Opset 17 or later, fixed shapes.
+   - Legacy `torch.onnx.export` (TorchScript, `dynamo=False`), opset 17,
+     fixed shapes. The dynamo exporter is reported to give NaNs on WebGPU.
 2. Compare ONNX Runtime with PyTorch on the same segment; error below about
    1e-4.
 3. Export a few small reference cases (input, STFT, outputs, final stems) into
    `src/__fixtures__/demucs/` to test the TypeScript port against.
 4. Precision: **FP16 only.**
-   - Convert with FP32 inputs and outputs (`keep_io_types`). Transformer layers
-     can overflow in FP16 (watch softmax and layer norm; keep those in FP32 if
+   - Convert with `onnxconverter_common.float16` and FP32 inputs and outputs
+     (`keep_io_types`). Transformer layers can overflow in FP16 (watch softmax
+     and layer norm; keep those in FP32 with the converter's block list if
      needed).
+   - Try true FP16 compute first (less GPU memory, faster). If it fails the
+     quality check even with a block list, fall back to FP16 weights with FP32
+     compute, the "fp16weights" approach: same download size, more runtime
+     memory.
    - The FP32 export is a development reference only, never shipped. The FP16
      file must stay within about 0.1 dB SDR of it on a few MUSDB tracks.
    - Record the file size, SDR and per-segment time in this document.
@@ -109,7 +135,8 @@ without WebGPU, and for a proper piano stem.
    per 7.8 s segment and peak memory for one segment
    (`measureUserAgentSpecificMemory()` on the cross-origin-isolated build), and
    time a 5-minute track against Spleeter on the same machine for the "slower"
-   hint (Step 4).
+   hint (Step 4). Run StemSplitio's `htdemucs_6s_fp16weights.onnx` through the
+   same test as a benchmark for our file's size, speed and output.
 
 **Gate:** if the browser test fails, stop or change the export before going
 further.
@@ -213,7 +240,8 @@ further.
   `htdemucs_6s/…`. The model list and packaging already scan subfolders.
 - `.github/workflows/ci.yml`: replace the "5 models per quality" check with a
   per-model check (5 + 5 Spleeter, plus the one Demucs FP16 file).
-- Add `models/LICENSE-DEMUCS` (MIT, Meta); store the ONNX files in Git LFS.
+- Add `models/LICENSE-DEMUCS` (MIT, Meta); store the Demucs file in Git LFS
+  with the Spleeter models (decided).
 - README: new download and build sizes, the model choice, Demucs needs
   WebGPU and is slower than Spleeter.
 - e2e:
@@ -239,10 +267,7 @@ M8b can run alongside M8a; it changes nothing for users.
 
 ## Open decisions
 
-1. **Hosting:** the Demucs FP16 file adds roughly 85 MB (measure at export) to
-   the repo, Docker image and GitHub Pages. Acceptable, or an optional
-   download from a separate host?
-2. **If FP16 fails the Step 0 check** (overflow that keeping a few layers in
+1. **If FP16 fails the Step 0 check** (overflow that keeping a few layers in
    FP32 does not fix): ship FP32 on WebGPU instead (~170 MB), or drop Demucs?
 
 ## Appendix: available memory in browsers
