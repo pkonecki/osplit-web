@@ -2,6 +2,14 @@
 
 Status: proposal, not started.
 
+## Decisions
+
+- **One Demucs variant: `htdemucs_6s` in FP16.** No FP32 and no int8 file.
+- **Demucs runs on WebGPU only.** Without WebGPU, the app keeps using Spleeter,
+  which stays the model for slow devices.
+- **The UI shows whether WebGPU is available** and says that Demucs is slower
+  than Spleeter.
+
 ## Where the app stands today
 
 - **Fixed set of five stems.** The app ships five separate Spleeter ONNX
@@ -70,9 +78,9 @@ Step 0 and Step 4 replace them with measured ones.
   So FP16 is the practical WebGPU precision, and int8 is mainly a way to shrink
   the download for WASM.
 
-**Conclusion:** Demucs is worth adding as the high-quality option, best on
-WebGPU in FP16. Keep Spleeter as the fast, low-memory option and for a proper
-piano stem, rather than replacing it.
+**Conclusion:** add Demucs as the high-quality option, in FP16 on WebGPU
+only (see Decisions). Keep Spleeter as the fast, low-memory option for devices
+without WebGPU, and for a proper piano stem.
 
 ## Step 0 – Convert the model (main risk, do first)
 
@@ -89,25 +97,19 @@ piano stem, rather than replacing it.
    1e-4.
 3. Export a few small reference cases (input, STFT, outputs, final stems) into
    `src/__fixtures__/demucs/` to test the TypeScript port against.
-4. Precision (see "Why Demucs, and what it costs"):
-   - Export FP32 as the reference.
-   - **FP16 is the target for WebGPU**: FP16 weights with FP32 inputs and
-     outputs (`keep_io_types`). Transformer layers can overflow in FP16 (watch
-     softmax and layer norm; keep those in FP32 if needed). Ship it only if its
-     SDR on a few MUSDB tracks is within about 0.1 dB of FP32.
-   - **Int8 as an option for WASM only**: dynamic quantization
-     (`onnxruntime.quantization.quantize_dynamic`, per-channel weights) to
-     roughly halve the download. Accept it only if it stays within about
-     0.3 dB of FP32 and is not slower than FP32 on WASM. Do not offer it on
-     WebGPU (no int8 kernels there).
-   - Record each variant's file size, SDR and per-segment time in this
-     document.
-5. Quick browser test with ONNX Runtime Web 1.31, on WebGPU and WASM, before
-   any app work: unsupported operators or memory blow-ups show up here.
-   Measure for each variant: time per 7.8 s segment, and peak memory for one
-   segment (`measureUserAgentSpecificMemory()` on the cross-origin-isolated
-   build). A segment much slower than real time on WASM is expected; note it,
-   it decides the default model (Open decision 2).
+4. Precision: **FP16 only.**
+   - Convert with FP32 inputs and outputs (`keep_io_types`). Transformer layers
+     can overflow in FP16 (watch softmax and layer norm; keep those in FP32 if
+     needed).
+   - The FP32 export is a development reference only, never shipped. The FP16
+     file must stay within about 0.1 dB SDR of it on a few MUSDB tracks.
+   - Record the file size, SDR and per-segment time in this document.
+5. Quick browser test with ONNX Runtime Web 1.31 on WebGPU, before any app
+   work: unsupported operators or memory blow-ups show up here. Measure time
+   per 7.8 s segment and peak memory for one segment
+   (`measureUserAgentSpecificMemory()` on the cross-origin-isolated build), and
+   time a 5-minute track against Spleeter on the same machine for the "slower"
+   hint (Step 4).
 
 **Gate:** if the browser test fails, stop or change the export before going
 further.
@@ -124,10 +126,10 @@ further.
 - `Project.model?: ModelId`; missing means Spleeter, so no IndexedDB migration.
 - `src/models.ts`:
   - A model registry: model id → files, qualities offered, stems, approximate
-    size.
+    size, and whether it needs WebGPU.
   - `modelKey` and `loadModel` take a model plus a file name.
-  - Demucs file: `htdemucs_6s/htdemucs_6s.onnx` (plus `.fp16.onnx` if Step 0
-    approves FP16).
+  - Demucs: one file, `htdemucs_6s/htdemucs_6s.fp16.onnx`, a single quality
+    and `requiresWebGpu: true`. Spleeter keeps its FP16 and FP32 files.
 - `completeSeparation`:
   - Store the stems the worker returns, not `STEMS`.
   - First delete the project's existing stems and peaks in the same
@@ -143,6 +145,9 @@ further.
 
 - `src/inference.worker.ts` keeps the common parts: WebGPU/WASM choice and
   fallback, cancellation, progress, FLAC encoding, waveform peaks.
+- No WASM fallback for Demucs: if WebGPU session creation or inference fails
+  (including `device.lost`), stop with an error that offers to separate with
+  Spleeter instead. Spleeter keeps today's WebGPU → WASM retry.
 - Model-specific code moves behind a `Separator` interface (`load`,
   `run(samples, onSamples)`, `release`):
   - `src/separators/spleeter.ts`: today's code, moved unchanged.
@@ -170,34 +175,56 @@ further.
 
 ## Step 4 – UI and memory estimate
 
-- `src/view/detail.ts`: model picker, "Spleeter · 5 stems" or "Demucs v4 ·
-  6 stems (best on WebGPU)", each with its download size. Quality buttons show
-  only what the selected model offers. Changing the model saves the project,
-  like the quality switch in `src/main.ts`.
+- **WebGPU detection on the main thread.** New `src/gpu.ts` with
+  `detectWebGpu(): Promise<boolean>` (`navigator.gpu?.requestAdapter()`,
+  cached). The worker's `preferredProvider` stays as it is; the main thread
+  needs its own answer to build the picker before any separation. The worker
+  reports the provider it actually used in its progress messages, so a
+  WebGPU failure at run time shows up in the UI too.
+- **WebGPU status in `src/view/detail.ts`**, near the model picker:
+  - available: "WebGPU: available", so the user knows separation runs on the
+    GPU;
+  - not available: "WebGPU: not available – separation runs on the CPU", and
+    Demucs is unavailable.
+- **Model picker:**
+  - "Spleeter · 5 stems · fast", with its FP16/FP32 quality buttons.
+  - "Demucs v4 · 6 stems · better quality, slower", single quality, so no
+    quality buttons. Its hint says separation takes longer than with Spleeter
+    (with the measured ratio from Step 0, e.g. "about N× longer"), and that its
+    piano stem is weak (the Demucs authors say so).
+  - Without WebGPU, the Demucs option is shown disabled with "Needs WebGPU",
+    rather than hidden, so users learn that a better model exists.
+  - Each option shows its download size. Changing the model saves the project,
+    like the quality switch in `src/main.ts`.
+  - Default for new projects: Demucs with WebGPU, Spleeter without. A project
+    saved with Demucs, opened later on a device without WebGPU, keeps its
+    stems; only a new separation must use Spleeter.
+- **Progress:** while Demucs runs, show "Separating with Demucs – this takes
+  longer than Spleeter" so a slow bar does not look stuck.
 - `src/memory.ts`: model file size and runtime factor per model, from the
   registry, plus a per-model working-memory term for one segment (activations
-  do not scale with file size, so a quantized file does not mean less of
-  them). Measure Demucs in Chromium (60 s and 5 min tracks, FP16 on WebGPU
-  and FP32/int8 on WASM), as was done for Spleeter. Attention over the 7.8 s
+  do not scale with file size). Measure Demucs FP16 on WebGPU in Chromium
+  (60 s and 5 min tracks), as was done for Spleeter. Attention over the 7.8 s
   segment is the main extra cost.
-- WASM is far slower: label progress "Separating on CPU – this may take
-  several minutes". Consider making Demucs the default only with WebGPU.
-- The picker hint notes the 6-stem piano stem is weak (the Demucs authors say
-  so).
 
 ## Step 5 – Build, CI, docs, licence
 
 - `vite.config.ts`: widen the dev-server model path pattern to allow
   `htdemucs_6s/…`. The model list and packaging already scan subfolders.
 - `.github/workflows/ci.yml`: replace the "5 models per quality" check with a
-  per-model check (5 + 5 Spleeter, plus the Demucs file or files).
+  per-model check (5 + 5 Spleeter, plus the one Demucs FP16 file).
 - Add `models/LICENSE-DEMUCS` (MIT, Meta); store the ONNX files in Git LFS.
-- README: new download and build sizes, the model choice, speed without
-  WebGPU.
-- e2e: separate a short clip (one segment) with Demucs: six FLAC stems of the
-  right length, a guitar row in the mixer, and switching back to Spleeter
-  removes the guitar stem. Check the CI time budget (WASM in headless Chromium
-  is slow).
+- README: new download and build sizes, the model choice, Demucs needs
+  WebGPU and is slower than Spleeter.
+- e2e:
+  - Headless Chromium in CI has no WebGPU adapter, so the picker shows
+    "WebGPU: not available", Demucs is disabled with "Needs WebGPU", and
+    Spleeter is the default. Test that.
+  - Stub `detectWebGpu` to true to test the "available" status, the "slower"
+    hint and the Demucs default, without running the model.
+  - A real Demucs separation (six FLAC stems, a guitar row in the mixer,
+    switching back to Spleeter removes the guitar stem) needs a WebGPU-capable
+    runner; run it manually or on such a runner, not in the default CI.
 
 ## Milestones
 
@@ -212,16 +239,11 @@ M8b can run alongside M8a; it changes nothing for users.
 
 ## Open decisions
 
-1. **Precision for Demucs:** proposed: FP16 on WebGPU if it matches FP32
-   (Step 0); FP32 or int8 on WASM, whichever is faster at acceptable quality.
-   Int8 is not worth offering on WebGPU.
-2. **Default model** for new projects: Spleeter, Demucs, or Demucs only with
-   WebGPU? Proposed: Demucs only with WebGPU, Spleeter otherwise, given the
-   5–20× compute cost on WASM. Confirm with the Step 0 timings.
-3. **Hosting:** Demucs adds roughly 85 MB (FP16) to 170 MB (FP32), plus about
-   42 MB if an int8 file is shipped (measure at export), to the repo, Docker
-   image and GitHub Pages. Acceptable, or an optional download from a
-   separate host?
+1. **Hosting:** the Demucs FP16 file adds roughly 85 MB (measure at export) to
+   the repo, Docker image and GitHub Pages. Acceptable, or an optional
+   download from a separate host?
+2. **If FP16 fails the Step 0 check** (overflow that keeping a few layers in
+   FP32 does not fix): ship FP32 on WebGPU instead (~170 MB), or drop Demucs?
 
 ## Appendix: available memory in browsers
 
@@ -246,9 +268,9 @@ Consequences for this plan:
 1. Keep the estimate-plus-`deviceMemory` warning; never warn when unknown.
 2. Calibrate Demucs memory once in development with
    `measureUserAgentSpecificMemory()` or the Chrome task manager.
-3. Recover from running out of memory: WebGPU `device.lost` and allocation
-   errors → fall back to WASM; WASM `RangeError` and ONNX Runtime allocator
-   errors; on a worker crash, suggest a shorter track or the Spleeter model.
-4. Choose the default model from weak hints (WebGPU available,
-   `hardwareConcurrency`, `navigator.userAgentData.mobile`) together with
-   `deviceMemory`, never from a memory number alone.
+3. Recover from running out of memory: for Spleeter, WebGPU `device.lost` and
+   allocation errors → fall back to WASM; for Demucs, stop and offer Spleeter
+   (no WASM fallback). On WASM `RangeError`, ONNX Runtime allocator errors or
+   a worker crash, suggest a shorter track or the Spleeter model.
+4. The default model follows WebGPU availability (Step 4), never a memory
+   number alone; `deviceMemory` only drives the long-track warning.
