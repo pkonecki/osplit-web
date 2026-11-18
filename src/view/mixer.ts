@@ -5,6 +5,7 @@ import { playerTime } from "../player";
 import { projectGrid } from "../tasks/analysis";
 import { DEFAULT_CLICK_VOLUME, type Project, STEM_LABELS, STEMS } from "../types";
 import { formatTime } from "./format";
+import { chordLaneMarkup, chordNowMarkup } from "./harmony";
 import { loopRulerMarkup, practiceMarkup } from "./practice";
 import { updatePlayheads, waveformMarkup } from "./waveforms";
 
@@ -43,7 +44,9 @@ export function renderMixer(project: Project): string {
         </div>
       </div>
       ${practiceMarkup(project)}
+      ${chordNowMarkup()}
       ${loopRulerMarkup()}
+      ${chordLaneMarkup()}
       <div class="stem-list">
         ${
     STEMS.filter((stem) => project.completedStems.includes(stem)).map((

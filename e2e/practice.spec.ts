@@ -177,6 +177,7 @@ test("speed, key and loop with decoded playback", async ({ page }) => {
 
   // A click on a waveform still seeks.
   const wave = page.locator('[data-waveform="drums"]');
+  await wave.scrollIntoViewIfNeeded();
   const waveBox = (await wave.boundingBox())!;
   await page.mouse.click(waveBox.x + waveBox.width * 0.25, waveBox.y + waveBox.height / 2);
   await expect.poll(() => position(page)).toBeCloseTo(1.5, 1);

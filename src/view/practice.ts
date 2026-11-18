@@ -13,6 +13,7 @@ import {
 } from "../practice";
 import { projectGrid } from "../tasks/analysis";
 import type { Project } from "../types";
+import { keyChipMarkup, keyPanelMarkup, updateHarmonyDisplay } from "./harmony";
 import { tempoChipMarkup, tempoPanelMarkup, updateTempoDisplay } from "./tempo";
 
 /**
@@ -54,6 +55,7 @@ export function practiceMarkup(project: Project): string {
     semitones >= MAX_SEMITONES ? "disabled" : ""
   }>+</button>
       </div>
+      ${keyChipMarkup()}
       <div class="practice-group loop-group" role="group" aria-label="Loop">
         <span class="practice-label">Loop</span>
         <button class="step-button" data-action="loop-set" data-edge="start" aria-label="Set loop start at the playhead ([)">A</button>
@@ -82,6 +84,7 @@ export function practiceMarkup(project: Project): string {
   }>Reset</button>
     </div>
     ${tempoPanelMarkup()}
+    ${keyPanelMarkup()}
   `;
 }
 
@@ -129,6 +132,7 @@ export function updatePracticeDisplay(project: Project): void {
     button.disabled = !grid;
   }
   updateTempoDisplay(project);
+  updateHarmonyDisplay(project);
   updateLoopDisplay(project);
 }
 
