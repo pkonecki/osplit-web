@@ -29,6 +29,51 @@ Status: proposal, not started.
 So this is a second separation engine beside the current one, not just more
 model files.
 
+## Why Demucs, and what it costs
+
+Figures below are published or typical numbers, not measurements in this app.
+Step 0 and Step 4 replace them with measured ones.
+
+- **Quality.** On MUSDB18-HQ, htdemucs (4-stem) reaches about 9 dB average SDR
+  against about 5.9 dB for Spleeter: an audible drop in bleed and in "watery"
+  artifacts. `htdemucs_6s` scores close to it on the four shared stems; its
+  guitar stem is usable, its piano stem weak (the authors say so). Piano users
+  may still prefer Spleeter, which keeps it as a separate model.
+- **Quantization keeps that lead.** FP16 is close to lossless; careful int8
+  usually costs about 0.1–0.3 dB, and Meta's own quantized Demucs releases
+  (`mdx_q`, `mdx_extra_q`) lost almost nothing. A quantized Demucs is still far
+  ahead of Spleeter.
+- **Weights: about the same size as today.** htdemucs has roughly 42 M
+  parameters (`htdemucs_6s` is in the same range; measure at export):
+
+  | Precision | Demucs (one file, approx.) | Spleeter (5 files, today) |
+  | --------- | -------------------------- | ------------------------- |
+  | FP32      | ~170 MB                    | ~197 MB                   |
+  | FP16      | ~85 MB                     | ~98 MB                    |
+  | Int8      | ~42 MB                     | –                         |
+
+  FP16 Demucs already matches the FP16 Spleeter set, so quantizing further is
+  not needed to match memory.
+- **Activations are the real memory cost.** Quantization shrinks only the
+  weights. The transformer's cross-attention over the 7.8 s segment needs more
+  working memory per segment than Spleeter's U-Nets, so peak memory can exceed
+  Spleeter even at equal file size. The `MODEL_FILE_BYTES × MODEL_RUNTIME_FACTOR`
+  estimate in `src/memory.ts` does not carry over; measure it (Step 4).
+- **Compute: much heavier.** Expect several times Spleeter's work per second
+  of audio (roughly 5–20×). Fine on WebGPU; on the WASM fallback (most phones
+  and Firefox today) a full track can take minutes instead of seconds.
+- **Int8 runs poorly on WebGPU.** ONNX Runtime Web's WebGPU backend has weak
+  int8 support: dynamically quantized operators (`MatMulInteger`,
+  `ConvInteger`) are missing or fall back to the CPU, which loses the speed
+  WebGPU brings. Weight-only 4-bit `MatMulNBits` exists but covers only the
+  transformer's matmuls, not the convolutions that hold most of the weights.
+  So FP16 is the practical WebGPU precision, and int8 is mainly a way to shrink
+  the download for WASM.
+
+**Conclusion:** Demucs is worth adding as the high-quality option, best on
+WebGPU in FP16. Keep Spleeter as the fast, low-memory option and for a proper
+piano stem, rather than replacing it.
+
 ## Step 0 – Convert the model (main risk, do first)
 
 1. Write `scripts/export-htdemucs.py`, pinned to `demucs==4.0.1` and the
@@ -44,13 +89,25 @@ model files.
    1e-4.
 3. Export a few small reference cases (input, STFT, outputs, final stems) into
    `src/__fixtures__/demucs/` to test the TypeScript port against.
-4. Precision:
-   - Ship FP32 first.
-   - Try FP16 with FP32 inputs and outputs (`keep_io_types`) on WebGPU.
-     Transformer layers often overflow in FP16; offer it only if it matches
-     FP32.
+4. Precision (see "Why Demucs, and what it costs"):
+   - Export FP32 as the reference.
+   - **FP16 is the target for WebGPU**: FP16 weights with FP32 inputs and
+     outputs (`keep_io_types`). Transformer layers can overflow in FP16 (watch
+     softmax and layer norm; keep those in FP32 if needed). Ship it only if its
+     SDR on a few MUSDB tracks is within about 0.1 dB of FP32.
+   - **Int8 as an option for WASM only**: dynamic quantization
+     (`onnxruntime.quantization.quantize_dynamic`, per-channel weights) to
+     roughly halve the download. Accept it only if it stays within about
+     0.3 dB of FP32 and is not slower than FP32 on WASM. Do not offer it on
+     WebGPU (no int8 kernels there).
+   - Record each variant's file size, SDR and per-segment time in this
+     document.
 5. Quick browser test with ONNX Runtime Web 1.31, on WebGPU and WASM, before
    any app work: unsupported operators or memory blow-ups show up here.
+   Measure for each variant: time per 7.8 s segment, and peak memory for one
+   segment (`measureUserAgentSpecificMemory()` on the cross-origin-isolated
+   build). A segment much slower than real time on WASM is expected; note it,
+   it decides the default model (Open decision 2).
 
 **Gate:** if the browser test fails, stop or change the export before going
 further.
@@ -118,8 +175,11 @@ further.
   only what the selected model offers. Changing the model saves the project,
   like the quality switch in `src/main.ts`.
 - `src/memory.ts`: model file size and runtime factor per model, from the
-  registry. Measure Demucs in Chromium (60 s and 5 min tracks), as was done for
-  Spleeter. Attention over the 7.8 s segment is the main extra cost.
+  registry, plus a per-model working-memory term for one segment (activations
+  do not scale with file size, so a quantized file does not mean less of
+  them). Measure Demucs in Chromium (60 s and 5 min tracks, FP16 on WebGPU
+  and FP32/int8 on WASM), as was done for Spleeter. Attention over the 7.8 s
+  segment is the main extra cost.
 - WASM is far slower: label progress "Separating on CPU – this may take
   several minutes". Consider making Demucs the default only with WebGPU.
 - The picker hint notes the 6-stem piano stem is weak (the Demucs authors say
@@ -152,11 +212,15 @@ M8b can run alongside M8a; it changes nothing for users.
 
 ## Open decisions
 
-1. **FP16 for Demucs:** only if it matches FP32, or FP32 only?
+1. **Precision for Demucs:** proposed: FP16 on WebGPU if it matches FP32
+   (Step 0); FP32 or int8 on WASM, whichever is faster at acceptable quality.
+   Int8 is not worth offering on WebGPU.
 2. **Default model** for new projects: Spleeter, Demucs, or Demucs only with
-   WebGPU?
-3. **Hosting:** Demucs adds roughly 50–100 MB (measure at export) to the repo,
-   Docker image and GitHub Pages. Acceptable, or an optional download from a
+   WebGPU? Proposed: Demucs only with WebGPU, Spleeter otherwise, given the
+   5–20× compute cost on WASM. Confirm with the Step 0 timings.
+3. **Hosting:** Demucs adds roughly 85 MB (FP16) to 170 MB (FP32), plus about
+   42 MB if an int8 file is shipped (measure at export), to the repo, Docker
+   image and GitHub Pages. Acceptable, or an optional download from a
    separate host?
 
 ## Appendix: available memory in browsers
