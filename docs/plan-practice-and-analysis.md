@@ -228,6 +228,9 @@ A **practice bar** sits under the player row:
   two draggable handles.
   - Dragging across empty waveform creates a region. A single click still
     seeks, as today; drag means a pointer move of more than 4 px.
+    *Changed with zoom:* a drag on the lanes now moves along the zoomed
+    track; the Loop button makes a 4-bar loop when there is none, and the
+    edges are dragged while the loop is on (see README, Practice tools).
   - Pointer Events handle mouse and touch the same way. Handles are at least
     24 px wide for touch.
   - Handles are focusable `role="slider"` elements, so the arrow keys move

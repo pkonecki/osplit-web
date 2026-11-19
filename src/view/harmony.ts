@@ -8,6 +8,7 @@ import { formatSemitones, MAX_SEMITONES, MIN_SEMITONES, projectSemitones } from 
 import { analysisStatus, cachedAnalysis, projectGrid } from "../tasks/analysis";
 import type { AnalysisRecord, ChordSegment, MusicalKey, Project } from "../types";
 import { escapeHtml, formatTime } from "./format";
+import { timelineView } from "./timeline";
 
 /**
  * Key and chords: the key chip in the practice bar and its panel, the
@@ -118,7 +119,7 @@ export function chordNowMarkup(): string {
 
 /** A strip of chord boxes aligned with the waveforms; click to seek, double-click to loop. */
 export function chordLaneMarkup(): string {
-  return `<div class="chord-lane" id="chord-lane" role="group" aria-label="Chords (click to seek, double-click to loop)" hidden><span class="playhead"></span></div>`;
+  return `<div class="chord-lane" id="chord-lane" role="group" aria-label="Chords (click to seek, double-click to loop)" hidden><div class="chord-track"></div><span class="playhead"></span></div>`;
 }
 
 /** What the lane shows now, so it is rebuilt only when that changes. */
@@ -230,22 +231,26 @@ function trackDuration(record: AnalysisRecord | null | undefined): number {
 
 function updateLane(project: Project, record: AnalysisRecord | null | undefined): void {
   const lane = document.querySelector<HTMLElement>("#chord-lane");
-  if (!lane) return;
+  const track = lane?.querySelector<HTMLElement>(".chord-track");
+  if (!lane || !track) return;
   const chords = record?.chords ?? [];
   const duration = trackDuration(record);
   const naming = chordNaming(project);
   const show = chords.some((chord) => chord.root !== null) && duration > 0;
+  // The boxes span the whole track inside `track`, which the view shifts
+  // and stretches; they are rebuilt only when their text or width changes.
+  const width = show ? lane.clientWidth * (duration / (timelineView(duration).span || duration)) : 0;
   const key = show
-    ? `${project.id}|${duration}|${naming.semitones}|${naming.key?.tonic}:${naming.key?.mode}|${lane.clientWidth}|${
+    ? `${project.id}|${duration}|${naming.semitones}|${naming.key?.tonic}:${naming.key?.mode}|${Math.round(width)}|${
       chords.length
     }|${chords[0]?.start}|${chords.at(-1)?.end}`
     : "";
   lane.hidden = !show;
-  if (key === laneKey && lane.querySelector(".chord-box")) return;
+  positionChordLane(duration);
+  if (key === laneKey && track.querySelector(".chord-box")) return;
   laneKey = key;
-  for (const box of lane.querySelectorAll(".chord-box")) box.remove();
+  track.replaceChildren();
   if (!show) return;
-  const width = lane.clientWidth;
   const html = chords.map((chord, index) => {
     if (chord.root === null) return "";
     const left = (chord.start / duration) * 100;
@@ -258,8 +263,17 @@ function updateLane(project: Project, record: AnalysisRecord | null | undefined)
       formatTime(chord.start)
     }"><span>${name}</span></button>`;
   }).join("");
-  lane.insertAdjacentHTML("beforeend", html);
+  track.insertAdjacentHTML("beforeend", html);
   lastCurrent = -2;
+}
+
+/** Shifts and stretches the chord boxes to the current view. */
+export function positionChordLane(duration = playerTime().duration): void {
+  const track = document.querySelector<HTMLElement>("#chord-lane .chord-track");
+  if (!track || !(duration > 0)) return;
+  const view = timelineView(duration);
+  track.style.left = `${(-view.start / view.span) * 100}%`;
+  track.style.width = `${(duration / view.span) * 100}%`;
 }
 
 /** Index of the chord last highlighted, so the display changes only when it does. */

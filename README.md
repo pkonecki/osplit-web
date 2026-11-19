@@ -118,10 +118,18 @@ The project player can slow down or speed up a track (50–150%) without
 changing its pitch, shift its key (±12 semitones) without changing its speed,
 and repeat an A–B loop. Speed, key and loop are saved with each project.
 
-- **Loop:** set the start (A) and end (B) at the playhead, or drag across a
-  waveform or the strip above the stems to draw a loop. Drag its handles to
-  adjust it; a click still seeks. Seeking after the loop end jumps to the
-  loop start.
+- **Loop:** the Loop button (or `L`) loops 4 bars from the playhead (4 s
+  without a beat grid) when there is no loop, and otherwise turns it on or
+  off. A and B set the start and end at the playhead. While the loop is on,
+  drag its edges on the ruler, chords or waveforms to adjust it; a click
+  still seeks. Seeking after the loop end jumps to the loop start.
+- **Zoom:** the overview strip above the ruler shows the whole track and the
+  part in view. Scroll on it to zoom, and drag it to move along. On the
+  lanes, drag to move along, Ctrl/⌘ + scroll or pinch to zoom, and scroll
+  sideways to move along; a plain scroll still scrolls the page. The
+  buttons beside the overview zoom in and out, show the whole track, or
+  frame the loop. While playing, the view jumps ahead when the playhead
+  reaches its edge.
 - **Export:** with *Mix with speed, key & loop* ticked in the mixer, the
   exported mix (alone or in the zip) uses the project's speed and key, and
   covers only the loop when it is on. Stem exports are never changed.
