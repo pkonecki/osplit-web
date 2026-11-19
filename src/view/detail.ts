@@ -114,7 +114,6 @@ export function gpuStatusText(gpu: GpuSupport, running: "webgpu" | "wasm" | null
   if (running === "webgpu") return "Separating on the GPU (WebGPU)";
   if (running === "wasm") return "Separating on the CPU – WebGPU is not in use";
   if (!gpu.webgpu) return "WebGPU: not available – separation runs on the CPU";
-  if (!gpu.f16) return "WebGPU: available, without FP16 support";
   return "WebGPU: available";
 }
 
@@ -134,7 +133,7 @@ function renderModelPicker(project: Project, gpu: GpuSupport, busy: boolean): st
   const hint = model === "htdemucs-6s"
     ? demucsOk
       ? "Demucs separates better than Spleeter but takes several times longer. Its piano stem is weak (its authors say so)."
-      : "Demucs needs WebGPU with FP16 support, which this browser does not offer. Choose Spleeter to separate here; the saved stems stay."
+      : "Demucs needs WebGPU, which this browser does not offer. Choose Spleeter to separate here; the saved stems stay."
     : "Spleeter is fast and runs on any device.";
   return `
       <section class="quality-row">
@@ -148,8 +147,8 @@ function renderModelPicker(project: Project, gpu: GpuSupport, busy: boolean): st
       "htdemucs-6s",
       "Demucs v4",
       demucsOk
-        ? `6 stems · better, slower · ${megabytes(modelDownloadBytes("htdemucs-6s", "fp16"))}`
-        : "Needs WebGPU with FP16 support",
+        ? `6 stems · better, slower · ${megabytes(modelDownloadBytes("htdemucs-6s", "fp32"))}`
+        : "Needs WebGPU",
       demucsOk,
     )
   }

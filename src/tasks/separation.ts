@@ -37,7 +37,7 @@ export async function separateProject(project: Project): Promise<void> {
   const model = projectModel(project);
   if (!modelAvailable(model, await detectGpu())) {
     throw new Error(
-      "Demucs needs WebGPU with FP16 support, which this browser does not offer. Choose Spleeter to separate here.",
+      "Demucs needs WebGPU, which this browser does not offer. Choose Spleeter to separate here.",
     );
   }
   state.working = true;

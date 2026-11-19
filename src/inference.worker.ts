@@ -58,16 +58,16 @@ async function separate(request: SeparateRequest): Promise<void> {
   try {
     report(id, "Loading models", 0);
     const gpu = await probeGpu();
-    if (demucs && !(gpu.webgpu && gpu.f16)) {
+    if (demucs && !gpu.webgpu) {
       throw new Error(
-        "Demucs needs WebGPU with FP16 support, which this browser does not offer. Separate with Spleeter instead.",
+        "Demucs needs WebGPU, which this browser does not offer. Separate with Spleeter instead.",
       );
     }
     let provider: Provider = gpu.webgpu ? "webgpu" : "wasm";
     reportProvider(id, provider);
 
     // Spleeter retries on the CPU when WebGPU fails; Demucs is far too slow
-    // there (and its FP16 model needs WebGPU), so it stops instead.
+    // there (slower than real time), so it stops instead.
     const retryOnCpu = async (error: unknown) => {
       if (demucs || provider !== "webgpu" || cancelled.has(id)) {
         throw demucs && !cancelled.has(id) ? demucsFailure(error) : error;

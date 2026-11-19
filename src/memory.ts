@@ -7,16 +7,16 @@ const SPLEETER_FILE_BYTES: Record<Quality, number> = {
   fp32: 196_600_000,
 };
 
-/** The Demucs FP16 file (models/htdemucs_6s). */
-const DEMUCS_FILE_BYTES = 57_835_216;
+/** The Demucs FP32 file (models/htdemucs_6s). */
+const DEMUCS_FILE_BYTES = 114_556_716;
 
 /**
  * Working memory of one Demucs segment (7.8 s), which Spleeter does not have
- * in this size: about 2 GB in FP32 on ONNX Runtime's CPU backend, so about
- * half in FP16 on WebGPU. On most phones and laptops the GPU shares system
- * memory, so it counts. An estimate until measured on real WebGPU devices.
+ * in this size: about 2 GB in FP32 on ONNX Runtime's CPU backend. On most
+ * phones and laptops the GPU shares system memory, so it counts. An estimate
+ * until measured on real WebGPU devices.
  */
-const DEMUCS_SEGMENT_BYTES = 1_200 * 1024 ** 2;
+const DEMUCS_SEGMENT_BYTES = 2_048 * 1024 ** 2;
 
 /** Download size of a model's files, for the model picker. */
 export function modelDownloadBytes(model: ModelId, quality: Quality): number {

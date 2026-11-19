@@ -3,8 +3,8 @@ import { createProjectWithClip, openApp, writeTestClip } from "./helpers";
 
 // Headless Chromium in CI has no WebGPU adapter, so Demucs is unavailable
 // there. The "available" cases replace navigator.gpu on the page with a stub:
-// they test the picker, not a Demucs separation, which needs a real GPU with
-// shader-f16 (see docs/htdemucs-6s-plan.md).
+// they test the picker, not a Demucs separation, which needs a real GPU (see
+// docs/htdemucs-6s-plan.md).
 
 let clip: string;
 
@@ -39,18 +39,18 @@ test("offers only Spleeter without WebGPU", async ({ page }) => {
   );
   await expect(spleeter(page)).toHaveClass(/selected/);
   await expect(demucs(page)).toBeDisabled();
-  await expect(demucs(page)).toContainText("Needs WebGPU with FP16 support");
+  await expect(demucs(page)).toContainText("Needs WebGPU");
   await expect(page.locator('[data-action="quality"]')).toHaveCount(2);
   await expect(page.locator('[data-action="separate"]')).toHaveText("Separate five stems");
 });
 
-test("offers only Spleeter when WebGPU has no FP16 shaders", async ({ page }) => {
+test("offers Demucs without FP16 shaders (the model is FP32)", async ({ page }) => {
   await stubGpu(page, false);
   await openApp(page);
   await createProjectWithClip(page, "No f16", clip);
-  await expect(status(page)).toHaveText("WebGPU: available, without FP16 support");
-  await expect(spleeter(page)).toHaveClass(/selected/);
-  await expect(demucs(page)).toBeDisabled();
+  await expect(status(page)).toHaveText("WebGPU: available");
+  await expect(demucs(page)).toHaveClass(/selected/);
+  await expect(demucs(page)).toBeEnabled();
 });
 
 test("defaults to Demucs with WebGPU and says it is slower", async ({ page }) => {
@@ -59,7 +59,7 @@ test("defaults to Demucs with WebGPU and says it is slower", async ({ page }) =>
   await createProjectWithClip(page, "GPU", clip);
   await expect(status(page)).toHaveText("WebGPU: available");
   await expect(demucs(page)).toHaveClass(/selected/);
-  await expect(demucs(page)).toContainText("6 stems · better, slower · 58 MB");
+  await expect(demucs(page)).toContainText("6 stems · better, slower · 115 MB");
   await expect(page.locator(".model-hint")).toContainText("takes several times longer");
   // Demucs has one quality.
   await expect(page.locator('[data-action="quality"]')).toHaveCount(0);
@@ -88,7 +88,7 @@ test("a Demucs project opened without WebGPU must switch to Spleeter to re-separ
   // Same browser profile: the app reopens the last project.
   await openApp(plain);
   await expect(plain.locator(".model-hint")).toContainText(
-    "Demucs needs WebGPU with FP16 support",
+    "Demucs needs WebGPU, which this browser does not offer",
   );
   await expect(plain.locator('[data-action="separate"]')).toBeDisabled();
   await plain.locator('[data-action="model"][data-model="spleeter-5"]').click();

@@ -24,7 +24,7 @@ export function spleeterKey(quality: Quality, stem: Stem): string {
     : `fp32/${stem}.onnx`;
 }
 
-export const DEMUCS_KEY = "htdemucs_6s/htdemucs_6s.fp16.onnx";
+export const DEMUCS_KEY = "htdemucs_6s/htdemucs_6s.onnx";
 
 /** One model file to download, and what to call it in progress messages. */
 export interface ModelFile {
@@ -34,7 +34,7 @@ export interface ModelFile {
 
 /**
  * The files a separation downloads: Spleeter has one per stem and quality,
- * Demucs a single FP16 file whatever the project's quality.
+ * Demucs a single FP32 file whatever the project's quality.
  */
 export function modelFiles(model: ModelId, quality: Quality): ModelFile[] {
   if (model === "htdemucs-6s") return [{ key: DEMUCS_KEY, label: "Demucs" }];

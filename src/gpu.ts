@@ -4,7 +4,10 @@ import type { ModelId } from "./types";
 export interface GpuSupport {
   /** A WebGPU adapter exists. */
   webgpu: boolean;
-  /** It has `shader-f16`, which the FP16 Demucs model needs. */
+  /**
+   * It has `shader-f16` (FP16 shaders). Not needed by the FP32 Demucs model
+   * shipped now; kept for an FP16 model later.
+   */
   f16: boolean;
 }
 
@@ -52,9 +55,9 @@ export function setGpuForTests(support: GpuSupport | undefined): void {
   detection = support ? Promise.resolve(support) : undefined;
 }
 
-/** Whether a model can run with this support. */
+/** Whether a model can run with this support: Demucs needs WebGPU. */
 export function modelAvailable(model: ModelId, support: GpuSupport): boolean {
-  return model === "spleeter-5" || (support.webgpu && support.f16);
+  return model === "spleeter-5" || support.webgpu;
 }
 
 /** Demucs where it can run (better stems), Spleeter elsewhere. */

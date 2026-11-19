@@ -98,7 +98,7 @@ describe("model files", () => {
       "fp16/other.fp16.onnx",
     ]);
     expect(modelFiles("spleeter-5", "fp32")[0].key).toBe("fp32/vocals.onnx");
-    // Demucs ships FP16 only, whatever the project's quality.
+    // Demucs ships one FP32 file, whatever the project's quality.
     for (const quality of ["fp16", "fp32"] as const) {
       expect(modelFiles("htdemucs-6s", quality)).toEqual([
         { key: DEMUCS_KEY, label: "Demucs" },

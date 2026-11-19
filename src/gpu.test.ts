@@ -32,16 +32,16 @@ describe("model choice", () => {
   const full = { webgpu: true, f16: true };
   const noF16 = { webgpu: true, f16: false };
 
-  it("offers Demucs only with WebGPU and shader-f16", () => {
+  it("offers Demucs with WebGPU, FP16 shaders or not (the model is FP32)", () => {
     expect(modelAvailable("htdemucs-6s", full)).toBe(true);
-    expect(modelAvailable("htdemucs-6s", noF16)).toBe(false);
+    expect(modelAvailable("htdemucs-6s", noF16)).toBe(true);
     expect(modelAvailable("htdemucs-6s", NO_GPU)).toBe(false);
     expect(modelAvailable("spleeter-5", NO_GPU)).toBe(true);
   });
 
   it("defaults to Demucs where it runs and Spleeter elsewhere", () => {
     expect(defaultModel(full)).toBe("htdemucs-6s");
-    expect(defaultModel(noF16)).toBe("spleeter-5");
+    expect(defaultModel(noF16)).toBe("htdemucs-6s");
     expect(defaultModel(NO_GPU)).toBe("spleeter-5");
   });
 });

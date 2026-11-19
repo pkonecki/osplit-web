@@ -26,8 +26,8 @@ import {
 export const DEMUCS_STAGE = "Separating with Demucs – this takes longer than Spleeter";
 
 /**
- * Demucs v4, 6 stems, one FP16 model. Runs on WebGPU only: the worker checks
- * for `shader-f16` before choosing it and never falls back to WASM.
+ * Demucs v4, 6 stems, one FP32 model. Runs on WebGPU only: the worker never
+ * falls back to WASM, where it would be slower than real time.
  */
 export class DemucsSeparator implements Separator {
   readonly stems = DEMUCS_SOURCES;
@@ -40,10 +40,10 @@ export class DemucsSeparator implements Separator {
 
   async load(provider: Provider): Promise<void> {
     if (provider !== "webgpu") {
-      throw new Error("Demucs needs WebGPU with FP16 support. Separate with Spleeter instead.");
+      throw new Error("Demucs needs WebGPU. Separate with Spleeter instead.");
     }
     const { context } = this;
-    const [file] = modelFiles("htdemucs-6s", "fp16");
+    const [file] = modelFiles("htdemucs-6s", "fp32");
     context.checkCancelled();
     const bytes = await loadModel(file, {
       onProgress: (fraction) =>

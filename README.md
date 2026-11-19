@@ -32,8 +32,8 @@ deno task test
 deno task build
 ```
 
-The build copies the models (about 353 MB total: both Spleeter qualities and
-the Demucs FP16 model) from this repository's `models/` folder into `dist/models`, with `models.json` listing each model's
+The build copies the models (about 410 MB total: both Spleeter qualities and
+the Demucs model) from this repository's `models/` folder into `dist/models`, with `models.json` listing each model's
 size and SHA-256. Models are downloaded and cached individually in the browser
 when first used; downloads are checked against `models.json`, and a model whose
 checksum changes is downloaded again.
@@ -78,9 +78,9 @@ is available:
 
 - **Demucs v4** (`htdemucs_6s`): six stems (vocals, guitar, piano, drums,
   bass, other) and clearly better separation, but several times slower than
-  Spleeter, and its piano stem is weak. It needs WebGPU with FP16 shader
-  support (`shader-f16`) and never runs on the CPU; it is the default for new
-  projects where available. The first run downloads 58 MB.
+  Spleeter, and its piano stem is weak. It needs WebGPU and never runs on the
+  CPU; it is the default for new projects where WebGPU is available. The first
+  run downloads 115 MB.
 - **Spleeter**: five stems (vocals, piano, drums, bass, other), fast, on any
   device: WebGPU when available, otherwise the WebAssembly CPU provider. The
   first run downloads about 98 MB for Low quality (FP16) or 197 MB for High
@@ -297,7 +297,7 @@ docker run --detach --name osplit-web --publish 8080:8080 --restart unless-stopp
 The container serves HTTP. Put it behind a TLS reverse proxy or load balancer
 for public production use. Port 8080 is available for local smoke testing at
 `http://localhost:8080`. The build context/image includes the ONNX models
-(about 353 MB), in addition to the ONNX Runtime WASM asset and yt-dlp wheel.
+(about 410 MB), in addition to the ONNX Runtime WASM asset and yt-dlp wheel.
 
 ## Models
 
@@ -317,7 +317,7 @@ publishes next to the models. If you use OSplit in research, cite Spleeter:
 
 The Demucs model is the pretrained `htdemucs_6s` model of
 [Demucs v4](https://github.com/facebookresearch/demucs) by Meta AI Research,
-converted to ONNX in half precision (FP16) by
+converted to ONNX in full precision (FP32) by
 [`scripts/export-htdemucs.py`](./scripts/export-htdemucs.py). It produces six
 stems (vocals, guitar, piano, drums, bass, other) over the full frequency
 range. Demucs is released under the MIT License by Meta Platforms; see

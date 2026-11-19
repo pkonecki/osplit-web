@@ -1,6 +1,7 @@
 # Plan: add the Demucs v4 6-stem model (`htdemucs_6s`)
 
-Status: implemented, pending a check on a real WebGPU device (see "Before
+Status: implemented; ships the **FP32** model since November 2026, while bad
+stems seen on a real GPU with the FP16 model are investigated (see "Before
 release").
 
 ## Before release
@@ -8,12 +9,17 @@ release").
 Not possible in the cloud environment used for the implementation, which has
 no GPU (SwiftShader lacks `shader-f16`):
 
-1. On a device with WebGPU and `shader-f16`, separate a full song with Demucs.
-   Compare the stems with the FP32 CPU reference
-   (`python scripts/export-htdemucs.py --audio song.wav`): if they differ
-   audibly or contain silence or noise, ship the FP32 file instead (decided):
-   re-export without `--fp16`, change `DEMUCS_KEY` and `DEMUCS_FILE_BYTES`, and
-   drop the `shader-f16` requirement in `src/gpu.ts`.
+1. **Done, failed:** the FP16 model gave wrong stems on a real WebGPU device.
+   The app now ships the FP32 export (`models/htdemucs_6s/htdemucs_6s.onnx`,
+   114.6 MB, SHA-256 `0a06c19f…`, 84.8 dB SNR against `demucs.apply_model`), and
+   Demucs needs WebGPU but no longer `shader-f16`. Next: separate the same song
+   with FP32 on that device.
+   - Good stems: FP16 numerics on the GPU were the cause. Keep FP32, or try
+     FP16 again with layers kept in FP32 (`--fp32-ops`).
+   - Still wrong: the cause is outside the precision, e.g. an ONNX Runtime
+     WebGPU kernel or the app around the model. The TypeScript pipeline with
+     the FP32 graph on WASM matches the Python reference (51–60 dB, Step 0
+     results), so compare WebGPU against WASM for one segment next.
 2. Time it against Spleeter on the same track; replace "several times longer"
    in the hint (`src/view/detail.ts`) with the measured ratio.
 3. Measure memory (60 s and 5 min tracks) and correct `DEMUCS_SEGMENT_BYTES`
@@ -35,10 +41,11 @@ no GPU (SwiftShader lacks `shader-f16`):
 
 ## Decisions
 
-- **One Demucs variant: `htdemucs_6s` in FP16.** No FP32 and no int8 file.
-- **Demucs runs on WebGPU only, and needs the `shader-f16` feature** (FP16
-  shaders; see Step 0 results). Without them, the app keeps using Spleeter,
-  which stays the model for slow devices.
+- **One Demucs variant: `htdemucs_6s`, in FP32 for now** (FP16 failed on a
+  real GPU; see Before release). No int8 file.
+- **Demucs runs on WebGPU only.** Without it, the app keeps using Spleeter,
+  which stays the model for slow devices. (The FP16 model also needed the
+  `shader-f16` feature; the FP32 one does not.)
 - **If FP16 fails the quality check on real GPUs, ship FP32 instead** (decided).
 - **The UI shows whether WebGPU is available** and says that Demucs is slower
   than Spleeter.
