@@ -1,35 +1,22 @@
 import * as ort from "onnxruntime-web";
 import ortWasmModuleUrl from "onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs?url";
 import ortWasmUrl from "onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm?url";
-import {
-  CHANNELS,
-  FREQUENCY_BINS,
-  SAMPLES_PER_SEGMENT,
-  SEGMENT_FRAMES,
-} from "./audio-core";
+import { CHANNELS } from "./audio-core";
 import { FlacEncoder } from "./flac";
-import { PeakBuilder } from "./peaks";
-import {
-  logitsToMasks,
-  OverlapAddSynthesizer,
-  planStft,
-  SegmentAnalyzer,
-  segmentFrames,
-} from "./stft";
-import {
-  modelDownloadProgress,
-  modelLoadedProgress,
-  separationProgress,
-} from "./progress";
+import { probeGpu } from "./gpu";
 import type { InferenceRequest, InferenceResponse } from "./messages";
-import { loadModel } from "./models";
-import { type Quality, type Stem, STEMS } from "./types";
+import type { ModelFile } from "./models";
+import { PeakBuilder } from "./peaks";
+import { DemucsSeparator } from "./separators/demucs";
+import type { Provider, Separator, SeparatorContext } from "./separators/separator";
+import { SpleeterSeparator } from "./separators/spleeter";
+import type { Stem } from "./types";
 
 type WorkerRequest = InferenceRequest;
 type WorkerResponse = InferenceResponse;
+type SeparateRequest = Extract<WorkerRequest, { type: "separate" }>;
 
 const cancelled = new Set<string>();
-const STEM_INDEX = new Map(STEMS.map((stem, index) => [stem, index]));
 
 // Load ONNX Runtime's WASM glue from its own file. With the copy embedded in this
 // bundle, its worker threads would start this worker script instead and crash.
@@ -41,20 +28,6 @@ ort.env.wasm.numThreads = crossOriginIsolated
   ? Math.min(4, Math.ceil((navigator.hardwareConcurrency || 1) / 2))
   : 1;
 
-interface GpuNavigator {
-  gpu?: { requestAdapter(): Promise<unknown | null> };
-}
-
-async function preferredProvider(): Promise<"webgpu" | "wasm"> {
-  const gpu = (navigator as GpuNavigator).gpu;
-  if (!gpu) return "wasm";
-  try {
-    return (await gpu.requestAdapter()) ? "webgpu" : "wasm";
-  } catch {
-    return "wasm";
-  }
-}
-
 self.addEventListener("message", (event: MessageEvent<WorkerRequest>) => {
   if (event.data.type === "cancel") {
     cancelled.add(event.data.id);
@@ -63,47 +36,67 @@ self.addEventListener("message", (event: MessageEvent<WorkerRequest>) => {
   }
 });
 
-async function separate(
-  request: Extract<WorkerRequest, { type: "separate" }>,
-): Promise<void> {
-  const { id, quality } = request;
-  let sessions: Partial<Record<Stem, ort.InferenceSession>> = {};
-  let provider: "webgpu" | "wasm" = "wasm";
+function contextFor(id: string): SeparatorContext {
+  return {
+    report: (stage, progress) => report(id, stage, progress),
+    reportDownload: (file, progress) => reportDownload(id, file, progress),
+    checkCancelled: () => checkCancelled(id),
+  };
+}
+
+function separatorFor(request: SeparateRequest): Separator {
+  const context = contextFor(request.id);
+  return request.model === "htdemucs-6s"
+    ? new DemucsSeparator(context)
+    : new SpleeterSeparator(request.quality, context);
+}
+
+async function separate(request: SeparateRequest): Promise<void> {
+  const { id } = request;
+  const demucs = request.model === "htdemucs-6s";
+  let separator = separatorFor(request);
   try {
     report(id, "Loading models", 0);
-    provider = await preferredProvider();
-    try {
-      sessions = await loadSessions(quality, id, provider);
-    } catch (error) {
-      if (provider !== "webgpu") throw error;
-      console.warn(
-        "WebGPU session creation failed; retrying with WASM.",
-        error,
+    const gpu = await probeGpu();
+    if (demucs && !gpu.webgpu) {
+      throw new Error(
+        "Demucs needs WebGPU, which this browser does not offer. Separate with Spleeter instead.",
       );
-      await releaseSessions(sessions);
-      provider = "wasm";
-      report(id, "Retrying on CPU…", 0);
-      sessions = await loadSessions(quality, id, provider);
     }
+    let provider: Provider = gpu.webgpu ? "webgpu" : "wasm";
+    reportProvider(id, provider);
 
+    // Spleeter retries on the CPU when WebGPU fails; Demucs is far too slow
+    // there (slower than real time), so it stops instead.
+    const retryOnCpu = async (error: unknown) => {
+      if (demucs || provider !== "webgpu" || cancelled.has(id)) {
+        throw demucs && !cancelled.has(id) ? demucsFailure(error) : error;
+      }
+      console.warn("WebGPU failed; retrying with WASM.", error);
+      await separator.release();
+      separator = separatorFor(request);
+      provider = "wasm";
+      reportProvider(id, provider);
+      report(id, "Retrying on CPU…", 0);
+      await separator.load(provider);
+    };
+
+    try {
+      await separator.load(provider);
+    } catch (error) {
+      await retryOnCpu(error);
+    }
     let outputs: SeparationResult;
     try {
-      outputs = await runSeparation(request.samples, sessions, id, quality);
+      outputs = await runSeparation(request.samples, separator, id);
     } catch (error) {
-      if (provider !== "webgpu" || cancelled.has(id)) throw error;
-      console.warn("WebGPU inference failed; retrying with WASM.", error);
-      await releaseSessions(sessions);
-      provider = "wasm";
-      report(id, "Retrying on CPU…", 0);
-      sessions = await loadSessions(quality, id, provider);
-      outputs = await runSeparation(request.samples, sessions, id, quality);
+      await retryOnCpu(error);
+      outputs = await runSeparation(request.samples, separator, id);
     }
     if (cancelled.has(id)) {
       self.postMessage({ type: "cancelled", id } satisfies WorkerResponse);
     } else {
-      self.postMessage(
-        { type: "complete", id, ...outputs } satisfies WorkerResponse,
-      );
+      self.postMessage({ type: "complete", id, ...outputs } satisfies WorkerResponse);
     }
   } catch (error) {
     if (cancelled.has(id)) {
@@ -113,176 +106,66 @@ async function separate(
         {
           type: "error",
           id,
-          message: error instanceof Error
-            ? error.message
-            : "Stem separation failed.",
+          message: error instanceof Error ? error.message : "Stem separation failed.",
         } satisfies WorkerResponse,
       );
     }
   } finally {
-    await releaseSessions(sessions);
+    await separator.release();
     cancelled.delete(id);
   }
 }
 
-async function loadSessions(
-  quality: Quality,
-  id: string,
-  provider: "webgpu" | "wasm",
-): Promise<Partial<Record<Stem, ort.InferenceSession>>> {
-  const sessions: Partial<Record<Stem, ort.InferenceSession>> = {};
-  try {
-    for (let index = 0; index < STEMS.length; index++) {
-      checkCancelled(id);
-      const stem = STEMS[index];
-      const bytes = await loadModel(quality, stem, {
-        onProgress: (fraction) =>
-          reportDownload(id, stem, modelDownloadProgress(index, STEMS.length, fraction)),
-        checkCancelled: () => checkCancelled(id),
-      });
-      sessions[stem] = await createSession(bytes, provider);
-      report(id, "Loading models", modelLoadedProgress(index, STEMS.length));
-    }
-    return sessions;
-  } catch (error) {
-    await releaseSessions(sessions);
-    throw error;
-  }
-}
-
-async function createSession(
-  model: ArrayBuffer,
-  provider: "webgpu" | "wasm",
-): Promise<ort.InferenceSession> {
-  return ort.InferenceSession.create(model, {
-    executionProviders: [provider],
-    graphOptimizationLevel: "all",
-  });
-}
-
-async function releaseSessions(
-  sessions: Partial<Record<Stem, ort.InferenceSession>>,
-): Promise<void> {
-  await Promise.all(
-    Object.values(sessions).map(async (session) => {
-      try {
-        await session?.release();
-      } catch {
-        // Session teardown must not replace the inference result.
-      }
-    }),
+function demucsFailure(error: unknown): Error {
+  console.warn("Demucs failed on WebGPU.", error);
+  const detail = error instanceof Error ? ` (${error.message})` : "";
+  return new Error(
+    `Demucs could not run on this GPU${detail}. Separate with Spleeter instead.`,
   );
 }
 
 interface SeparationResult {
-  stems: Record<Stem, Blob>;
-  peaks: Record<Stem, Float32Array>;
+  stems: Partial<Record<Stem, Blob>>;
+  peaks: Partial<Record<Stem, Float32Array>>;
 }
 
+/**
+ * Runs the separator and encodes each stem to FLAC as its samples become
+ * final, so no full-length copy of the output is kept. The same samples feed
+ * each stem's waveform overview.
+ */
 async function runSeparation(
-  interleavedSamples: Float32Array,
-  sessions: Partial<Record<Stem, ort.InferenceSession>>,
+  samples: Float32Array,
+  separator: Separator,
   id: string,
-  quality: Quality,
 ): Promise<SeparationResult> {
-  if (
-    interleavedSamples.length === 0 ||
-    interleavedSamples.length % CHANNELS !== 0
-  ) {
+  if (samples.length === 0 || samples.length % CHANNELS !== 0) {
     throw new Error("The decoded source has no valid stereo samples.");
   }
-  const frameCount = interleavedSamples.length / CHANNELS;
-  const { encoders, peakBuilders } = await separateIntoFlac(
-    interleavedSamples,
-    frameCount,
-    sessions,
-    id,
-    quality,
-  );
+  const frameCount = samples.length / CHANNELS;
+  const encoders = separator.stems.map(() => new FlacEncoder());
+  const peakBuilders = separator.stems.map(() => new PeakBuilder(frameCount));
+  await separator.run(samples, (source, pcm) => {
+    encoders[source].push(pcm);
+    peakBuilders[source].push(pcm);
+  });
   checkCancelled(id);
   // finish() copies each stem's frames into its Blob: one stem at a time, so
   // only one extra copy exists at once.
-  const stems = {} as Record<Stem, Blob>;
-  const peaks = {} as Record<Stem, Float32Array>;
-  STEMS.forEach((stem, index) => {
+  const stems: Partial<Record<Stem, Blob>> = {};
+  const peaks: Partial<Record<Stem, Float32Array>> = {};
+  separator.stems.forEach((stem, index) => {
     stems[stem] = encoders[index].finish();
     peaks[stem] = peakBuilders[index].result();
   });
   return { stems, peaks };
 }
 
-/**
- * Runs the models over the input and encodes each stem to FLAC as its samples
- * become final, so no full-length copy of the output is kept. The same
- * samples feed each stem's waveform overview.
- */
-async function separateIntoFlac(
-  interleavedSamples: Float32Array,
-  frameCount: number,
-  sessions: Partial<Record<Stem, ort.InferenceSession>>,
-  id: string,
-  quality: Quality,
-): Promise<{ encoders: FlacEncoder[]; peakBuilders: PeakBuilder[] }> {
-  const plan = planStft(frameCount);
-  const encoders = STEMS.map(() => new FlacEncoder());
-  const peakBuilders = STEMS.map(() => new PeakBuilder(frameCount));
-  const synthesizer = new OverlapAddSynthesizer(plan, {
-    sourceCount: STEMS.length,
-    onSamples: (source, pcm) => {
-      encoders[source].push(pcm);
-      peakBuilders[source].push(pcm);
-    },
-  });
-  const analyzer = new SegmentAnalyzer(interleavedSamples, plan);
-  const logits = new Float32Array(
-    STEMS.length * CHANNELS * SAMPLES_PER_SEGMENT,
-  );
-
-  for (let segment = 0; segment < plan.segmentCount; segment++) {
-    checkCancelled(id);
-    analyzer.analyze(segment);
-
-    for (const stem of STEMS) {
-      checkCancelled(id);
-      const session = sessions[stem];
-      if (!session) throw new Error(`The ${stem} model is not loaded.`);
-      const tensor = new ort.Tensor("float32", analyzer.spectrogram, [
-        CHANNELS,
-        1,
-        SEGMENT_FRAMES,
-        FREQUENCY_BINS,
-      ]);
-      const result = await session.run({ [session.inputNames[0]]: tensor });
-      const output = result[session.outputNames[0]];
-      if (!output || !(output.data instanceof Float32Array)) {
-        throw new Error(`Unexpected output tensor for the ${stem} model.`);
-      }
-      const stemIndex = STEM_INDEX.get(stem)!;
-      logits.set(
-        output.data.subarray(0, CHANNELS * SAMPLES_PER_SEGMENT),
-        stemIndex * CHANNELS * SAMPLES_PER_SEGMENT,
-      );
-      tensor.dispose();
-      for (const value of Object.values(result)) value.dispose();
-    }
-
-    logitsToMasks(logits, STEMS.length, segmentFrames(plan, segment));
-    synthesizer.synthesize(segment, analyzer.spectra, logits);
-    report(
-      id,
-      `Separating · ${quality.toUpperCase()}`,
-      separationProgress(segment + 1, plan.segmentCount),
-    );
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-  }
-  return { encoders, peakBuilders };
-}
-
 let lastDownloadReport = "";
 
 /** Reports download progress only when the shown value changes. */
-function reportDownload(id: string, stem: Stem, progress: number): void {
-  const stage = `Downloading ${stem} model`;
+function reportDownload(id: string, file: ModelFile, progress: number): void {
+  const stage = `Downloading ${file.label} model`;
   const signature = `${id}:${stage}:${progress}`;
   if (signature === lastDownloadReport) return;
   lastDownloadReport = signature;
@@ -290,9 +173,11 @@ function reportDownload(id: string, stem: Stem, progress: number): void {
 }
 
 function report(id: string, stage: string, progress: number): void {
-  self.postMessage(
-    { type: "progress", id, stage, progress } satisfies WorkerResponse,
-  );
+  self.postMessage({ type: "progress", id, stage, progress } satisfies WorkerResponse);
+}
+
+function reportProvider(id: string, provider: Provider): void {
+  self.postMessage({ type: "provider", id, provider } satisfies WorkerResponse);
 }
 
 function checkCancelled(id: string): void {

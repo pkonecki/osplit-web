@@ -7,6 +7,7 @@ import {
   setExportAppliesPractice,
   setExportFormat,
 } from "./export";
+import { defaultModel, detectGpu } from "./gpu";
 import { enableIsolationReload } from "./isolation";
 import { appUrl } from "./paths";
 import {
@@ -44,7 +45,7 @@ import {
   SPEED_STEP,
 } from "./practice";
 import { startMediaSession, updateMediaSession } from "./player/media-session";
-import { onRender, state } from "./state";
+import { onRender, requestRender, state } from "./state";
 import {
   deleteProject,
   getProject,
@@ -86,6 +87,7 @@ import {
 import { installWakeLock } from "./tasks/wake-lock";
 import {
   type GridEdits,
+  type ModelId,
   newProject,
   type Project,
   type Quality,
@@ -147,6 +149,11 @@ void start();
 
 async function start(): Promise<void> {
   registerServiceWorker();
+  // The model picker and new projects' default model depend on WebGPU.
+  // Detection is usually instant; do not hold the page for a slow one.
+  const gpu = detectGpu();
+  await Promise.race([gpu, new Promise((resolve) => setTimeout(resolve, 1500))]);
+  void gpu.then(() => requestRender());
   try {
     state.projects = await listProjects();
     // A task still running in another tab holds its project's lock.
@@ -259,7 +266,7 @@ async function handleClick(event: Event): Promise<void> {
         const name =
           document.querySelector<HTMLInputElement>("#new-project-name")
             ?.value ?? "";
-        state.selectedProject = await saveProject(newProject(name));
+        state.selectedProject = await saveProject(newProject(name, defaultModel()));
         localStorage.setItem("osplit-web-last-project", state.selectedProject.id);
         state.screenMessage = "";
         await render();
@@ -301,6 +308,15 @@ async function handleClick(event: Event): Promise<void> {
       case "import":
         state.fileDialogTarget = "source";
         document.querySelector<HTMLInputElement>("#audio-file")?.click();
+        break;
+      case "model":
+        if (state.selectedProject && button.dataset.model) {
+          state.selectedProject = await saveProject({
+            ...state.selectedProject,
+            model: button.dataset.model as ModelId,
+          });
+          await render();
+        }
         break;
       case "quality":
         if (state.selectedProject && button.dataset.quality) {

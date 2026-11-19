@@ -197,7 +197,10 @@ function serveAndPackageModels(): Plugin {
           response.end(devManifest);
           return;
         }
-        if (!/^(fp16|fp32)\/[a-z]+(?:\.fp16)?\.onnx$/.test(requested)) {
+        if (
+          !/^(?:(fp16|fp32)\/[a-z]+(?:\.fp16)?|htdemucs_6s\/htdemucs_6s)\.onnx$/
+            .test(requested)
+        ) {
           response.statusCode = 404;
           response.end("Model not found");
           return;

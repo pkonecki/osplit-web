@@ -1,13 +1,26 @@
+import { type GpuSupport, knownGpu, modelAvailable } from "../gpu";
+import { modelDownloadBytes } from "../memory";
 import { appUrl } from "../paths";
 import { state } from "../state";
 import { AUDIO_ACCEPT } from "../tasks/import";
 import { urlTaskActive } from "../tasks/url-download";
-import type { Project } from "../types";
+import {
+  MODEL_STEMS,
+  type ModelId,
+  type Project,
+  projectModel,
+  type Quality,
+} from "../types";
 import { escapeHtml, statusLabel } from "./format";
 import { renderMixer } from "./mixer";
 
 export function renderDetail(project: Project): string {
   const complete = project.completedStems.length > 0;
+  const model = projectModel(project);
+  const gpu = knownGpu();
+  // Saved with Demucs, opened where it cannot run: the stems stay, but a new
+  // separation needs Spleeter.
+  const blocked = !modelAvailable(model, gpu);
   const busy = state.working || project.status === "processing";
   // Marked as processing but not by this tab: another tab holds its lock.
   const elsewhere = !state.working && project.status === "processing";
@@ -44,21 +57,7 @@ export function renderDetail(project: Project): string {
   }
       </section>
       <p class="hint">URL download runs entirely in your browser and works only when the provider permits browser access. YouTube and many sites block this; importing a local audio file is the reliable option.</p>
-      <section class="quality-row">
-        <div><h2>Model quality</h2><p class="muted">Models are downloaded and cached on first use.</p></div>
-        <div class="quality-buttons">
-          <button class="quality ${
-    project.quality === "fp32" ? "selected" : ""
-  }" data-action="quality" data-quality="fp32" ${
-    busy ? "disabled" : ""
-  }>High quality <small>FP32 · 197 MB</small></button>
-          <button class="quality ${
-    project.quality === "fp16" ? "selected" : ""
-  }" data-action="quality" data-quality="fp16" ${
-    busy ? "disabled" : ""
-  }>Low quality <small>FP16 · 98 MB</small></button>
-        </div>
-      </section>
+      ${renderModelPicker(project, gpu, busy)}
       ${
     project.sourceName && project.sourceRemoved && !busy
       ? `<section class="empty-card compact source-removed"><h3>Source audio removed</h3><p class="muted">It was deleted after separation to save space. Import it again to re-separate.</p></section>`
@@ -66,7 +65,7 @@ export function renderDetail(project: Project): string {
       ? `<section class="process-card">
               <button class="button primary" data-action="${
         busy ? "cancel" : "separate"
-      }" ${elsewhere ? "disabled" : ""}>${
+      }" ${elsewhere || (blocked && !busy) ? "disabled" : ""}>${
         urlTaskActive()
           ? "Cancel download"
           : elsewhere
@@ -77,7 +76,7 @@ export function renderDetail(project: Project): string {
           ? "Separate again"
           : project.status === "interrupted"
           ? "Retry separation"
-          : "Separate five stems"
+          : `Separate ${STEM_COUNT_WORDS[MODEL_STEMS[model].length]} stems`
       }</button>
               <label class="check-row"><input type="checkbox" data-action="delete-source-option" ${
         project.deleteSourceAfterSeparation ? "checked" : ""
@@ -102,6 +101,71 @@ export function renderDetail(project: Project): string {
     <footer>OSplit Web · IndexedDB local storage · <a href="${appUrl("README-web.html")}">Browser limitations</a></footer>
     ${fileInputMarkup()}
   `;
+}
+
+const STEM_COUNT_WORDS: Record<number, string> = { 5: "five", 6: "six" };
+
+function megabytes(bytes: number): string {
+  return `${Math.round(bytes / 1_000_000)} MB`;
+}
+
+/** What the browser's WebGPU means for separation, or where it runs now. */
+export function gpuStatusText(gpu: GpuSupport, running: "webgpu" | "wasm" | null): string {
+  if (running === "webgpu") return "Separating on the GPU (WebGPU)";
+  if (running === "wasm") return "Separating on the CPU – WebGPU is not in use";
+  if (!gpu.webgpu) return "WebGPU: not available – separation runs on the CPU";
+  return "WebGPU: available";
+}
+
+function renderModelPicker(project: Project, gpu: GpuSupport, busy: boolean): string {
+  const model = projectModel(project);
+  const demucsOk = modelAvailable("htdemucs-6s", gpu);
+  const option = (id: ModelId, title: string, detail: string, enabled: boolean) =>
+    `<button class="quality ${model === id ? "selected" : ""}" data-action="model" data-model="${id}" ${
+      busy || !enabled ? "disabled" : ""
+    }>${title} <small>${detail}</small></button>`;
+  const quality = (id: Quality, title: string) =>
+    `<button class="quality ${project.quality === id ? "selected" : ""}" data-action="quality" data-quality="${id}" ${
+      busy ? "disabled" : ""
+    }>${title} <small>${id.toUpperCase()} · ${
+      megabytes(modelDownloadBytes("spleeter-5", id))
+    }</small></button>`;
+  const hint = model === "htdemucs-6s"
+    ? demucsOk
+      ? "Demucs separates better than Spleeter but takes longer: about 1.2× Spleeter High quality on a desktop GPU, more on weaker ones. Its piano stem is weak (its authors say so)."
+      : "Demucs needs WebGPU, which this browser does not offer. Choose Spleeter to separate here; the saved stems stay."
+    : "Spleeter is fast and runs on any device.";
+  return `
+      <section class="quality-row">
+        <div><h2>Separation model</h2><p class="muted gpu-status">${
+    escapeHtml(gpuStatusText(gpu, busy ? state.provider : null))
+  }</p><p class="muted">Models are downloaded and cached on first use.</p></div>
+        <div class="quality-buttons">
+          ${option("spleeter-5", "Spleeter", "5 stems · fast", true)}
+          ${
+    option(
+      "htdemucs-6s",
+      "Demucs v4",
+      demucsOk
+        ? `6 stems · better, slower · ${megabytes(modelDownloadBytes("htdemucs-6s", "fp32"))}`
+        : "Needs WebGPU",
+      demucsOk,
+    )
+  }
+        </div>
+      </section>
+      ${
+    model === "spleeter-5"
+      ? `<section class="quality-row">
+        <div><h2>Spleeter quality</h2></div>
+        <div class="quality-buttons">
+          ${quality("fp32", "High quality")}
+          ${quality("fp16", "Low quality")}
+        </div>
+      </section>`
+      : ""
+  }
+      <p class="hint model-hint">${escapeHtml(hint)}</p>`;
 }
 
 export function fileInputMarkup(): string {

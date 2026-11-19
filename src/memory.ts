@@ -1,11 +1,27 @@
 import { CHANNELS, wavByteLength } from "./audio-core";
-import { STEMS, type Quality } from "./types";
+import { type ModelId, MODEL_STEMS, type Quality } from "./types";
 
-/** Total size of the five model files per quality. */
-const MODEL_FILE_BYTES: Record<Quality, number> = {
+/** Total size of the five Spleeter model files per quality. */
+const SPLEETER_FILE_BYTES: Record<Quality, number> = {
   fp16: 98_400_000,
   fp32: 196_600_000,
 };
+
+/** The Demucs FP32 file (models/htdemucs_6s). */
+const DEMUCS_FILE_BYTES = 114_556_716;
+
+/**
+ * Working memory of one Demucs segment (7.8 s), which Spleeter does not have
+ * in this size: about 2 GB in FP32 on ONNX Runtime's CPU backend. On most
+ * phones and laptops the GPU shares system memory, so it counts. An estimate
+ * until measured on real WebGPU devices.
+ */
+const DEMUCS_SEGMENT_BYTES = 2_048 * 1024 ** 2;
+
+/** Download size of a model's files, for the model picker. */
+export function modelDownloadBytes(model: ModelId, quality: Quality): number {
+  return model === "htdemucs-6s" ? DEMUCS_FILE_BYTES : SPLEETER_FILE_BYTES[quality];
+}
 
 /**
  * ONNX Runtime keeps its own copies of the weights next to the downloaded
@@ -27,14 +43,16 @@ const DEVICE_MEMORY_SHARE = 0.25;
 /** Approximate peak memory a separation of `frameCount` stereo frames needs. */
 export function estimateSeparationBytes(
   frameCount: number,
+  model: ModelId,
   quality: Quality,
 ): number {
   const input = frameCount * CHANNELS * 4;
-  const stems = STEMS.length * wavByteLength(frameCount);
+  const stems = MODEL_STEMS[model].length * wavByteLength(frameCount);
   // One stem is copied at a time while the results are turned into Blobs.
   const blobCopy = wavByteLength(frameCount);
-  const models = MODEL_FILE_BYTES[quality] * MODEL_RUNTIME_FACTOR;
-  return RUNTIME_BASE_BYTES + input + stems + blobCopy + models;
+  const models = modelDownloadBytes(model, quality) * MODEL_RUNTIME_FACTOR;
+  const working = model === "htdemucs-6s" ? DEMUCS_SEGMENT_BYTES : 0;
+  return RUNTIME_BASE_BYTES + input + stems + blobCopy + models + working;
 }
 
 /**

@@ -626,7 +626,7 @@ deletion together with the project, and invalidation on re-separation.
 
 ### Pipeline (pure TypeScript, in `src/analysis/`, running in the analysis worker)
 
-1. **Harmonic input**: piano + bass + other stems, with vocals added at a low
+1. **Harmonic input**: piano + bass + other stems (plus guitar with Demucs), with vocals added at a low
    weight (0.3) for melody-heavy songs. Drums are excluded. This is a real
    advantage of having stems: percussion is the main source of noise in
    chroma features.

@@ -1,3 +1,4 @@
+import { defaultModel } from "../gpu";
 import { appUrl } from "../paths";
 import { requestRender, state } from "../state";
 import { replaceSource, saveProject } from "../storage";
@@ -40,7 +41,7 @@ export const NOT_AUDIO_MESSAGE =
  */
 export async function importAsNewProject(file: File): Promise<void> {
   if (!isAudioFile(file)) throw new Error(NOT_AUDIO_MESSAGE);
-  const project = await saveProject(newProject(projectNameFor(file.name)));
+  const project = await saveProject(newProject(projectNameFor(file.name), defaultModel()));
   state.selectedProject = await replaceSource(project, file, file.name);
   localStorage.setItem("osplit-web-last-project", project.id);
   state.screenMessage = "";

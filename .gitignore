@@ -29,3 +29,6 @@ coverage
 dist-pages
 test-results
 playwright-report
+
+# Python bytecode (scripts/export-htdemucs.py)
+__pycache__/

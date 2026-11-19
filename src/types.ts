@@ -1,5 +1,33 @@
-export const STEMS = ["vocals", "piano", "drums", "bass", "other"] as const;
-export type Stem = (typeof STEMS)[number];
+/** Every stem any model produces, in display order. */
+export const ALL_STEMS = [
+  "vocals",
+  "guitar",
+  "piano",
+  "drums",
+  "bass",
+  "other",
+] as const;
+export type Stem = (typeof ALL_STEMS)[number];
+
+/** Separation models: Spleeter (5 stems, any device) and Demucs v4 (6 stems, WebGPU). */
+export type ModelId = "spleeter-5" | "htdemucs-6s";
+export const MODEL_IDS: readonly ModelId[] = ["spleeter-5", "htdemucs-6s"];
+
+/** The stems each model produces, in display order. */
+export const MODEL_STEMS: Record<ModelId, readonly Stem[]> = {
+  "spleeter-5": ["vocals", "piano", "drums", "bass", "other"],
+  "htdemucs-6s": ["vocals", "guitar", "piano", "drums", "bass", "other"],
+};
+
+/** A project's model; projects saved before the choice existed used Spleeter. */
+export function projectModel(project: Pick<Project, "model">): ModelId {
+  return project.model ?? "spleeter-5";
+}
+
+/** A stem's volume; projects saved before a stem existed have none (full). */
+export function stemLevel(project: Pick<Project, "volumes">, stem: Stem): number {
+  return project.volumes[stem] ?? 1;
+}
 /** A mixer row: a stem, or the click track (once the beats are analysed). */
 export type Track = Stem | "click";
 
@@ -26,9 +54,13 @@ export interface Project {
   status: ProjectStatus;
   taskProgress?: number;
   taskStage?: string;
+  /** Separation model. Missing = Spleeter (projects saved before the choice). */
+  model?: ModelId;
+  /** Spleeter's model files; Demucs has one quality. */
   quality: Quality;
   completedStems: Stem[];
-  volumes: Record<Stem, number>;
+  /** Per-stem volume, 0–1. A missing stem plays at full volume. */
+  volumes: Partial<Record<Stem, number>>;
   mutedStems: Stem[];
   /** Soloed rows. Missing on projects saved before solo existed. */
   soloStems?: Track[];
@@ -145,6 +177,7 @@ export const DEFAULT_CLICK_VOLUME = 0.8;
 
 export const TRACK_LABELS: Record<Track, string> = {
   vocals: "Vocals",
+  guitar: "Guitar",
   piano: "Piano",
   drums: "Drums",
   bass: "Bass",
@@ -154,13 +187,17 @@ export const TRACK_LABELS: Record<Track, string> = {
 
 export const STEM_LABELS: Record<Stem, string> = {
   vocals: "Vocals",
+  guitar: "Guitar",
   piano: "Piano",
   drums: "Drums",
   bass: "Bass",
   other: "Other",
 };
 
-export function newProject(name: string): Project {
+export function newProject(
+  name: string,
+  model: ModelId = "spleeter-5",
+): Project {
   const now = Date.now();
   return {
     id: crypto.randomUUID(),
@@ -171,9 +208,10 @@ export function newProject(name: string): Project {
     status: "empty",
     taskProgress: 0,
     taskStage: "",
+    model,
     quality: "fp16",
     completedStems: [],
-    volumes: { vocals: 1, piano: 1, drums: 1, bass: 1, other: 1 },
+    volumes: {},
     mutedStems: [],
     soloStems: [],
     errorMessage: null,
