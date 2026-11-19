@@ -296,8 +296,8 @@ docker run --detach --name osplit-web --publish 8080:8080 --restart unless-stopp
 
 The container serves HTTP. Put it behind a TLS reverse proxy or load balancer
 for public production use. Port 8080 is available for local smoke testing at
-`http://localhost:8080`. The build context/image includes roughly 295 MB of
-ONNX models, in addition to the ONNX Runtime WASM asset and yt-dlp wheel.
+`http://localhost:8080`. The build context/image includes the ONNX models
+(about 353 MB), in addition to the ONNX Runtime WASM asset and yt-dlp wheel.
 
 ## Models
 
@@ -315,8 +315,20 @@ publishes next to the models. If you use OSplit in research, cite Spleeter:
 > "Spleeter: a fast and efficient music source separation tool with
 > pre-trained models." *Journal of Open Source Software*, 5(50), 2154, 2020.
 
+The Demucs model is the pretrained `htdemucs_6s` model of
+[Demucs v4](https://github.com/facebookresearch/demucs) by Meta AI Research,
+converted to ONNX in half precision (FP16) by
+[`scripts/export-htdemucs.py`](./scripts/export-htdemucs.py). It produces six
+stems (vocals, guitar, piano, drums, bass, other) over the full frequency
+range. Demucs is released under the MIT License by Meta Platforms; see
+[`models/LICENSE-DEMUCS`](./models/LICENSE-DEMUCS). If you use it in research,
+cite Demucs v4:
+
+> Simon Rouard, Francisco Massa, Alexandre Défossez. "Hybrid Transformers for
+> Music Source Separation." *ICASSP 2023*.
+
 ## License
 
 The OSplit Web code is released under the [MIT License](./LICENSE). The models
-are covered by the Spleeter license above. Pitch shifting uses Signalsmith
+are covered by the Spleeter and Demucs licenses above. Pitch shifting uses Signalsmith
 Stretch by Geraint Luff, released under the MIT License.
