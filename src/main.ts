@@ -151,9 +151,11 @@ async function start(): Promise<void> {
   registerServiceWorker();
   // The model picker and new projects' default model depend on WebGPU.
   // Detection is usually instant; do not hold the page for a slow one.
-  const gpu = detectGpu();
+  let gpuDetected = false;
+  const gpu = detectGpu().then(() => {
+    gpuDetected = true;
+  });
   await Promise.race([gpu, new Promise((resolve) => setTimeout(resolve, 1500))]);
-  void gpu.then(() => requestRender());
   try {
     state.projects = await listProjects();
     // A task still running in another tab holds its project's lock.
@@ -176,6 +178,10 @@ async function start(): Promise<void> {
     state.selectedProject =
       state.projects.find((project) => project.id === lastId) ?? null;
     await render();
+    // A slow detection re-renders once it is known. Only after the first
+    // render: a render started earlier, before the last project is selected,
+    // could finish last and replace the project page with the project list.
+    if (!gpuDetected) void gpu.then(() => requestRender());
     void requestPersistentStorage();
     installLaunchQueue((file) => void importFile(file));
     const shared = await takeSharedFile();
