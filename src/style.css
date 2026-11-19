@@ -207,6 +207,7 @@ input[type="range"] { width: 100%; accent-color: var(--lime); cursor: pointer; }
 .zoom-buttons { display: flex; gap: .25rem; }
 .zoom-text { font-size: .72rem; }
 body.timeline-zoomed .waveform, body.timeline-zoomed .loop-ruler, body.timeline-zoomed .chord-lane { cursor: grab; }
+.loop-ruler.loop-hover, body.timeline-zoomed .loop-ruler.loop-hover { cursor: move; }
 .waveform.edge-hover, .loop-ruler.edge-hover, .chord-lane.edge-hover, .edge-hover .chord-box, body.timeline-zoomed .edge-hover { cursor: ew-resize; }
 [hidden] { display: none !important; }
 .stem-control:focus-visible { outline: 2px solid var(--lime); outline-offset: 2px; border-radius: 10px; }

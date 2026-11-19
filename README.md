@@ -121,8 +121,9 @@ and repeat an A–B loop. Speed, key and loop are saved with each project.
 - **Loop:** the Loop button (or `L`) loops 4 bars from the playhead (4 s
   without a beat grid) when there is no loop, and otherwise turns it on or
   off. A and B set the start and end at the playhead. While the loop is on,
-  drag its edges on the ruler, chords or waveforms to adjust it; a click
-  still seeks. Seeking after the loop end jumps to the loop start.
+  drag its edges on the ruler, chords or waveforms to adjust it, or drag
+  inside it on the bar ruler to move it, keeping its length; a click still
+  seeks. Seeking after the loop end jumps to the loop start.
 - **Zoom:** the overview strip above the ruler shows the whole track and the
   part in view. Scroll on it to zoom, and drag it to move along. On the
   lanes, drag to move along, Ctrl/⌘ + scroll or pinch to zoom, and scroll

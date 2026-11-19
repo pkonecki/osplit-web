@@ -189,6 +189,23 @@ test("speed, key and loop with decoded playback", async ({ page }) => {
   await page.mouse.click(waveBox.x + waveBox.width * 0.25, waveBox.y + waveBox.height / 2);
   await expect.poll(() => position(page)).toBeCloseTo(1.5, 1);
 
+  // On the ruler, dragging inside the loop moves it, keeping its length;
+  // a click inside it still seeks.
+  await ruler.scrollIntoViewIfNeeded();
+  const rulerBox = (await ruler.boundingBox())!;
+  const onRuler = (seconds: number) => rulerBox.x + rulerBox.width * (seconds / 6);
+  const rulerMid = rulerBox.y + rulerBox.height / 2;
+  await drag(onRuler(3), onRuler(3.5), rulerMid);
+  await expect.poll(async () => (await saved(page)).loop?.start).toBeCloseTo(2.5, 1);
+  expect((await saved(page)).loop?.end).toBeCloseTo(4.5, 1);
+  expect(await position(page)).toBeCloseTo(1.5, 1);
+  await drag(onRuler(3.5), onRuler(3), rulerMid);
+  await expect.poll(async () => (await saved(page)).loop?.start).toBeCloseTo(2, 1);
+  expect((await saved(page)).loop?.end).toBeCloseTo(4, 1);
+  await page.mouse.click(onRuler(3), rulerMid);
+  await expect.poll(() => position(page)).toBeCloseTo(3, 1);
+  await seekTo(page, 1.5);
+
   // Zoom: the overview marks the part in view.
   const viewBox = page.locator(".overview-window");
   const windowShare = () =>
@@ -199,11 +216,12 @@ test("speed, key and loop with decoded playback", async ({ page }) => {
   expect((await windowShare()).width).toBeCloseTo(100, 0);
   await page.click('[data-action="zoom"][data-zoom="in"]');
   expect(await windowShare()).toEqual({ left: 25, width: 50 });
-  // Dragging on the ruler moves along (a quarter of the ruler: 0.75 s).
+  // Dragging on the ruler outside the loop moves along (a quarter of the
+  // ruler: 0.75 s). The view is 1.5–4.5 s and the loop 2–4 s.
   await ruler.scrollIntoViewIfNeeded();
   const rulerNow = (await ruler.boundingBox())!;
   const rulerY = rulerNow.y + rulerNow.height / 2;
-  await drag(rulerNow.x + rulerNow.width * 0.6, rulerNow.x + rulerNow.width * 0.35, rulerY);
+  await drag(rulerNow.x + rulerNow.width * 0.95, rulerNow.x + rulerNow.width * 0.7, rulerY);
   await expect.poll(async () => (await windowShare()).left).toBeCloseTo(37.5, 0);
   expect((await windowShare()).width).toBeCloseTo(50, 0);
   expect((await saved(page)).loop).toMatchObject({ start: 2, end: 4 });

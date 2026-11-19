@@ -16,8 +16,9 @@ import { holdTimelineFollow, laneTime, setTimelineView, timelineView } from "./t
  * Pointer and wheel input on the timeline.
  *
  * Lanes (loop ruler, chord lane, waveforms): dragging a loop edge moves it
- * (while the loop is on); dragging anywhere else moves along the track when
- * zoomed in; two fingers pinch to zoom. A press without movement stays a
+ * (while the loop is on), and on the ruler dragging inside the loop moves
+ * the whole loop; dragging anywhere else moves along the track when zoomed
+ * in; two fingers pinch to zoom. A press without movement stays a
  * click, which seeks. Ctrl/⌘ + wheel (or a trackpad pinch) zooms, and a
  * sideways wheel moves along. A plain wheel scrolls the page.
  *
@@ -48,10 +49,16 @@ const SCROLL_SPEED = 1.2;
 type Drag =
   | { kind: "pan"; element: HTMLElement; startX: number; view: TimeView; moved: boolean }
   | {
+    /** A loop edge, or on the ruler the whole loop ("both"). */
     kind: "edge";
     element: HTMLElement;
-    edge: "start" | "end";
+    edge: "start" | "end" | "both";
+    /** The loop when the drag began, and as dragged so far. */
+    origin: ProjectLoop;
     loop: ProjectLoop;
+    /** Where the press was: the track time and the pointer. */
+    grab: number;
+    startX: number;
     moved: boolean;
     lastX: number;
     lastEvent: PointerEvent;
@@ -99,8 +106,10 @@ export function installTimelineInput(root: HTMLElement, callbacks: TimelineCallb
   let scrollTime = 0;
 
   const end = () => {
-    // A drag, a pinch, or a press on a loop edge doesn't seek.
-    if (drag && (drag.kind !== "pan" || drag.moved)) suppressClick = true;
+    // A drag, a pinch, or a press on a loop edge doesn't seek; a click
+    // inside the loop on the ruler still does.
+    const click = drag?.kind === "pan" || (drag?.kind === "edge" && drag.edge === "both");
+    if (drag && (!click || ("moved" in drag && drag.moved))) suppressClick = true;
     if (drag?.kind === "edge" && drag.moved) callbacks.commit(drag.loop);
     drag = null;
     cancelAnimationFrame(scrollFrame);
@@ -111,6 +120,17 @@ export function installTimelineInput(root: HTMLElement, callbacks: TimelineCallb
   /** Moves the dragged edge to the pointer (after the view moved, too). */
   const moveEdge = (state: Extract<Drag, { kind: "edge" }>) => {
     const duration = playerTime().duration;
+    if (state.edge === "both") {
+      // The whole loop: its start follows the pointer (snapped), keeping
+      // its length, inside the track.
+      const { origin } = state;
+      const length = origin.end - origin.start;
+      const wanted = origin.start + laneTime(state.element, state.lastX) - state.grab;
+      const start = Math.max(0, Math.min(duration - length, callbacks.snap(wanted, state.lastEvent)));
+      state.loop = { ...origin, start: round(start), end: round(start + length) };
+      callbacks.preview(state.loop);
+      return;
+    }
     const time = callbacks.snap(laneTime(state.element, state.lastX), state.lastEvent);
     const { loop } = state;
     const start = state.edge === "start" ? Math.min(time, loop.end - MIN_LOOP_SECONDS) : loop.start;
@@ -180,20 +200,26 @@ export function installTimelineInput(root: HTMLElement, callbacks: TimelineCallb
     }
     if (pointers.size > 1) return;
 
-    const edge = edgeAt(lane!, event.clientX, callbacks.loop());
-    if (edge) {
+    const loop = callbacks.loop();
+    const edge = edgeAt(lane!, event.clientX, loop) ?? (insideLoop(lane!, event.clientX, loop) ? "both" : null);
+    if (edge && loop) {
       drag = {
         kind: "edge",
         element: lane!,
         edge,
-        loop: callbacks.loop()!,
+        origin: loop,
+        loop,
+        grab: laneTime(lane!, event.clientX),
+        startX: event.clientX,
         moved: false,
         lastX: event.clientX,
         lastEvent: event,
       };
-      lane!.setPointerCapture(event.pointerId);
-      holdTimelineFollow(true);
-      event.preventDefault();
+      if (edge !== "both") {
+        lane!.setPointerCapture(event.pointerId);
+        holdTimelineFollow(true);
+        event.preventDefault();
+      }
       return;
     }
     drag = {
@@ -226,6 +252,15 @@ export function installTimelineInput(root: HTMLElement, callbacks: TimelineCallb
         break;
       }
       case "edge":
+        if (!drag.moved) {
+          // Moving the whole loop starts after a few pixels, so a click
+          // inside it still seeks.
+          if (drag.edge === "both") {
+            if (Math.abs(event.clientX - drag.startX) < DRAG_THRESHOLD) return;
+            drag.element.setPointerCapture(event.pointerId);
+            holdTimelineFollow(true);
+          }
+        }
         drag.moved = true;
         drag.lastX = event.clientX;
         drag.lastEvent = event;
@@ -299,6 +334,17 @@ export function installTimelineInput(root: HTMLElement, callbacks: TimelineCallb
   }, { passive: false });
 }
 
+/** Whether `clientX` is inside the loop on the ruler, while the loop is on. */
+function insideLoop(lane: HTMLElement, clientX: number, loop: ProjectLoop | undefined): boolean {
+  if (!loop?.enabled || !lane.classList.contains("loop-ruler")) return false;
+  const time = laneTime(lane, clientX);
+  return time > loop.start && time < loop.end;
+}
+
+function round(seconds: number): number {
+  return Math.round(seconds * 1000) / 1000;
+}
+
 /** The track time at `clientX` over the overview (the whole track). */
 function overviewTime(overview: HTMLElement, clientX: number, duration: number): number {
   const rect = overview.getBoundingClientRect();
@@ -306,10 +352,16 @@ function overviewTime(overview: HTMLElement, clientX: number, duration: number):
   return Math.max(0, Math.min(1, fraction)) * duration;
 }
 
-/** Shows a resize cursor over a loop edge, and a grab cursor when zoomed. */
+/**
+ * Shows a resize cursor over a loop edge, a move cursor inside the loop on
+ * the ruler, and a grab cursor when zoomed.
+ */
 function hoverCursor(event: PointerEvent, callbacks: TimelineCallbacks): void {
   if (event.pointerType !== "mouse") return;
   const lane = (event.target as HTMLElement).closest<HTMLElement>(LANES);
   if (!lane) return;
-  lane.classList.toggle("edge-hover", edgeAt(lane, event.clientX, callbacks.loop()) !== null);
+  const loop = callbacks.loop();
+  const edge = edgeAt(lane, event.clientX, loop) !== null;
+  lane.classList.toggle("edge-hover", edge);
+  lane.classList.toggle("loop-hover", !edge && insideLoop(lane, event.clientX, loop));
 }
