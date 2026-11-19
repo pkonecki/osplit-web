@@ -25,12 +25,26 @@ export interface GpuLike {
 export async function probeGpu(
   gpu: GpuLike | undefined = (navigator as Navigator & { gpu?: GpuLike }).gpu,
 ): Promise<GpuSupport> {
-  if (!gpu) return NO_GPU;
+  // The reason goes to the console: the page only says "not available".
+  if (!gpu) {
+    console.info(
+      "WebGPU: navigator.gpu is missing (browser without WebGPU, WebGPU turned off, or not a secure context: use https or localhost).",
+    );
+    return NO_GPU;
+  }
   try {
     const adapter = await gpu.requestAdapter();
-    if (!adapter) return NO_GPU;
-    return { webgpu: true, f16: adapter.features.has("shader-f16") };
-  } catch {
+    if (!adapter) {
+      console.info(
+        "WebGPU: no adapter (GPU blocklisted, hardware acceleration off, or the GPU process crashed earlier; see chrome://gpu and restart the browser).",
+      );
+      return NO_GPU;
+    }
+    const support = { webgpu: true, f16: adapter.features.has("shader-f16") };
+    console.info("WebGPU: adapter found.", support);
+    return support;
+  } catch (error) {
+    console.info("WebGPU: requestAdapter failed.", error);
     return NO_GPU;
   }
 }
