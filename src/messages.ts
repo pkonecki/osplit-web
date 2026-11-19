@@ -1,5 +1,6 @@
 import type { ModelId, Quality, Stem } from "./types";
 import type { RhythmResult } from "./analysis/rhythm";
+import type { TonalResult } from "./analysis/tonal";
 
 /** Page → inference worker. */
 export type InferenceRequest =
@@ -48,10 +49,12 @@ export type AnalysisRequest = {
   source: Float32Array;
   sourceName: "drums" | "mix";
   bass?: Float32Array;
+  /** Bass, piano, other and quieter vocals, for key and chords. */
+  harmonic?: Float32Array;
 };
 
 /** Analysis worker → page. */
 export type AnalysisResponse =
   | { type: "progress"; id: string; stage: string; progress: number }
-  | { type: "complete"; id: string; result: RhythmResult }
+  | { type: "complete"; id: string; result: RhythmResult & Partial<TonalResult> }
   | { type: "error"; id: string; message: string };

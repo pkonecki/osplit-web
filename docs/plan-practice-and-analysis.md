@@ -587,6 +587,31 @@ deletion together with the project, and invalidation on re-separation.
 
 ## M10 — Key and chord detection
 
+> **Status: implemented.** Differences from the plan below:
+> - Chords use the beats as detected, not the user-corrected grid, so a grid
+>   edit doesn't need a new analysis. The chord sheet does follow the
+>   corrected bars.
+> - The templates include the first four harmonics of each note (log chroma
+>   keeps overtones strong). The bass bonus is +0.1 for the root and +0.07
+>   for another chord tone, so an inversion (C/E) isn't read as the chord on
+>   its bass note (Em). The diatonic bias is a +0.05 bonus on the chord score
+>   rather than on transitions.
+> - The key comes from the chords first found without a key (their triad
+>   notes by duration) blended with half the summed chroma, then the chords
+>   are found again with the key. The chroma's overtones alone made a G major
+>   cadence read as D major.
+> - The key override is stored as `keyOverride` on the analysis record, not
+>   in the grid edits (undoing grid corrections shouldn't drop it). "Show as"
+>   is stored on the project (`chordNames`). "Announce chord changes" is a
+>   per-browser setting.
+> - Version 1 records are shown while they are re-analysed (the rhythm is
+>   recomputed too, about a second), and their grid edits carry over.
+> - On synthetic sawtooth progressions (unit tests), the six test keys are
+>   found and chord accuracy is at least 90% for each progression. A 4-minute
+>   track takes about 1.8 s more than rhythm alone in Node in the
+>   development container. In the e2e test the C–G–Am–F pad comes back
+>   exactly after separation. Listening tests on real music are still to do.
+
 ### Goals
 
 1. Detect the song's **key** (24 major and minor keys), with a confidence and

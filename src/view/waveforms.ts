@@ -182,7 +182,7 @@ export function updatePlayheads(): void {
   const percent = duration ? (position / duration) * 100 : 0;
   for (
     const head of document.querySelectorAll<HTMLElement>(
-      ".waveform .playhead, .loop-ruler .playhead",
+      ".waveform .playhead, .loop-ruler .playhead, .chord-lane .playhead",
     )
   ) {
     head.style.left = `${percent}%`;

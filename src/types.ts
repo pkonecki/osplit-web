@@ -78,6 +78,8 @@ export interface Project {
   semitones?: number;
   /** A–B loop; missing when none is set. */
   loop?: ProjectLoop;
+  /** Chords and key named as written (original) or as heard with the key shift. Missing = transposed. */
+  chordNames?: "original" | "transposed";
   errorMessage: string | null;
 }
 
@@ -112,6 +114,51 @@ export interface AnalysisRecord {
   beatsPerBar: BeatsPerBar;
   firstDownbeatIndex: number;
   edits?: GridEdits;
+  // Tonal analysis (M10). Missing on records analysed before it existed.
+  /** Tuning offset from A = 440 Hz, in cents (−50…50). */
+  tuningCents?: number;
+  /** The song's key; null when the harmonic stems are silent. */
+  key?: KeyEstimate | null;
+  /** Key changes held long enough to matter, in time order (the first is the opening key). */
+  modulations?: Modulation[];
+  /** Chord timeline, covering the track. */
+  chords?: ChordSegment[];
+  /** The key the user set, overriding the detected one. */
+  keyOverride?: MusicalKey;
+}
+
+export type Mode = "major" | "minor";
+
+/** A key: tonic pitch class (0 = C … 11 = B) and mode. */
+export interface MusicalKey {
+  tonic: number;
+  mode: Mode;
+}
+
+export interface KeyEstimate extends MusicalKey {
+  /** 0–1: how clearly this key stands out. */
+  confidence: number;
+  /** The second most likely key (often the relative major or minor). */
+  alternative: MusicalKey;
+}
+
+/** A point from which the music stays in another key. */
+export interface Modulation extends MusicalKey {
+  /** Seconds. */
+  start: number;
+}
+
+export type ChordQuality = "maj" | "min";
+
+/** A chord held from `start` to `end` (seconds). */
+export interface ChordSegment {
+  start: number;
+  end: number;
+  /** Root pitch class (0 = C), or null for no chord. */
+  root: number | null;
+  quality: ChordQuality;
+  /** Bass pitch class when it is not the root (an inversion: C/E). */
+  bass?: number;
 }
 
 export interface StoredBlob {

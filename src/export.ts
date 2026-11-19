@@ -12,6 +12,8 @@ import {
 } from "./audio-core";
 import { renderClickTrack } from "./analysis/click";
 import type { BeatGrid } from "./analysis/grid";
+import { type ChordNaming, chordSheet, labFile } from "./analysis/chord-sheet";
+import { formatTempo } from "./analysis/grid";
 import { decodeStem } from "./audio-decode";
 import { type AudioFormat, detectAudioFormat } from "./audio-format";
 import { encodeFlac } from "./flac";
@@ -102,6 +104,32 @@ export async function stemFile(blob: Blob, format: AudioFormat): Promise<Blob> {
     return encodeFlac(new Int16Array(bytes, WAV_HEADER_BYTES, frames * CHANNELS));
   }
   return encodeWavPcm16(stereoToPcm16(await decodeStem(blob)));
+}
+
+/**
+ * Downloads the chord timeline: a chord sheet (four bars a line) or a MIREX
+ * `.lab` file, named as shown (`naming`); `keyLine` describes the key.
+ */
+export function exportChords(
+  project: Project,
+  format: "txt" | "lab",
+  naming: ChordNaming,
+  keyLine: string,
+): void {
+  const record = cachedAnalysis(project.id);
+  const chords = record?.chords;
+  if (!record || !chords?.length) return;
+  const base = safeFileName(project.name);
+  if (format === "lab") {
+    downloadBlob(new Blob([labFile(chords, naming)], { type: "text/plain" }), `${base}-chords.lab`);
+    return;
+  }
+  const grid = projectGrid(project.id);
+  const header = [project.name, `Key: ${keyLine}`];
+  if (grid) header.push(`Tempo: ${formatTempo(grid.bpm, 1)} BPM, ${grid.beatsPerBar}/4`);
+  header.push("Chords detected by OSplit (simplified to major and minor).");
+  const text = chordSheet(chords, grid, record.duration, naming, header);
+  downloadBlob(new Blob([text], { type: "text/plain;charset=utf-8" }), `${base}-chords.txt`);
 }
 
 export async function exportStem(project: Project, stem: Track): Promise<void> {

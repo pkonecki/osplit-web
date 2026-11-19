@@ -1,6 +1,7 @@
 import "./style.css";
 import {
   exportAll,
+  exportChords,
   exportMix,
   exportStem,
   setExportAppliesPractice,
@@ -62,6 +63,7 @@ import {
   onAnalysisChange,
   projectGrid,
   saveGridEdits,
+  saveKeyOverride,
 } from "./tasks/analysis";
 import {
   cancelSeparation,
@@ -100,6 +102,20 @@ import { updatePlayerDisplay } from "./view/mixer";
 import { updateLoopDisplay, updatePracticeDisplay } from "./view/practice";
 import { renderProjects } from "./view/projects";
 import { setTempoPanelOpen, tempoPanelOpen } from "./view/tempo";
+import {
+  chordForBox,
+  chordNaming,
+  followChords,
+  keyPanelOpen,
+  keyText,
+  parseKey,
+  setAnnounceChords,
+  setKeyPanelOpen,
+  songKey,
+  updateChordNow,
+  updateHarmonyDisplay,
+} from "./view/harmony";
+import { keyName } from "./analysis/spelling";
 import { setGridOverlay, showWaveforms, waveformSeekTime } from "./view/waveforms";
 
 const root = document.querySelector<HTMLDivElement>("#app");
@@ -109,6 +125,8 @@ onRender(render);
 setPlayerTick(() => {
   updatePlayerDisplay();
   updateMediaSession(playerTime());
+  if (state.selectedProject) updateChordNow(state.selectedProject);
+  followChords();
 });
 setPlayerLoaded((project) => {
   void showWaveforms(project).catch(console.warn);
@@ -413,6 +431,36 @@ async function handleClick(event: Event): Promise<void> {
         setTempoPanelOpen(!tempoPanelOpen());
         if (state.selectedProject) updatePracticeDisplay(state.selectedProject);
         break;
+      case "key-panel":
+        setKeyPanelOpen(!keyPanelOpen());
+        if (state.selectedProject) updatePracticeDisplay(state.selectedProject);
+        break;
+      case "key-alternative":
+        if (state.selectedProject) {
+          await saveKeyOverride(state.selectedProject.id, parseKey(button.dataset.key));
+        }
+        break;
+      case "chord-names":
+        if (state.selectedProject) {
+          const updated: Project = {
+            ...state.selectedProject,
+            chordNames: button.dataset.names === "original" ? "original" : "transposed",
+          };
+          state.selectedProject = updated;
+          updatePracticeDisplay(updated);
+          const saved = await saveProject(updated);
+          if (state.selectedProject === updated) state.selectedProject = saved;
+        }
+        break;
+      case "chord-seek":
+        if (state.selectedProject) {
+          const chord = chordForBox(state.selectedProject, button);
+          if (chord) seekTo(chord.start);
+        }
+        break;
+      case "export-chords":
+        if (state.selectedProject) exportProjectChords(state.selectedProject, button.dataset.format);
+        break;
       case "tempo-factor":
         if (state.selectedProject) {
           await editGrid(state.selectedProject, (edits) => {
@@ -536,6 +584,26 @@ function refreshAnalysis(project: Project): void {
   updatePracticeDisplay(project);
   const hasRow = document.querySelector('[data-stem-row="click"]') !== null;
   if (hasRow !== (grid !== null)) void render();
+}
+
+/** Downloads the chord sheet (txt) or .lab file, named as the page shows them. */
+function exportProjectChords(project: Project, format: string | undefined): void {
+  const naming = chordNaming(project);
+  const key = songKey(cachedAnalysis(project.id));
+  const semitones = naming.semitones;
+  const keyLine = key ? keyText(key, semitones) : naming.key ? `unclear (perhaps ${keyName(naming.key)})` : "unknown";
+  exportChords(project, format === "lab" ? "lab" : "txt", naming, keyLine);
+}
+
+/** Double-clicking a chord in the lane loops it. */
+async function loopChord(event: MouseEvent): Promise<void> {
+  const box = (event.target as HTMLElement).closest<HTMLElement>(".chord-box");
+  const project = state.selectedProject;
+  if (!box || !project) return;
+  const chord = chordForBox(project, box);
+  if (!chord) return;
+  const end = Math.min(chord.end, playerTime().duration || chord.end);
+  await savePractice({ ...project, loop: { start: chord.start, end, enabled: true } });
 }
 
 /** Saves a correction to the project's beat grid. */
@@ -824,6 +892,14 @@ async function handleChange(event: Event): Promise<void> {
     setExportAppliesPractice(target.checked);
     return;
   }
+  if (target.dataset.action === "key-select" && state.selectedProject) {
+    await saveKeyOverride(state.selectedProject.id, parseKey(target.value));
+    return;
+  }
+  if (target.dataset.action === "announce-chords") {
+    setAnnounceChords(target.checked);
+    return;
+  }
   if (target.dataset.action === "delete-source-option" && state.selectedProject) {
     state.selectedProject = await saveProject({
       ...state.selectedProject,
@@ -865,6 +941,16 @@ root.addEventListener("click", (event) => {
   void handleClick(event).catch(showError);
 });
 root.addEventListener("input", handleInput);
+root.addEventListener("dblclick", (event) => {
+  void loopChord(event).catch(showError);
+});
+let harmonyResize = 0;
+window.addEventListener("resize", () => {
+  cancelAnimationFrame(harmonyResize);
+  harmonyResize = requestAnimationFrame(() => {
+    if (state.selectedProject) updateHarmonyDisplay(state.selectedProject);
+  });
+});
 installLoopDrag(root, {
   loop: () => state.selectedProject?.loop,
   duration: () => playerTime().duration,

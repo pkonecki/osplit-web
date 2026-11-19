@@ -167,6 +167,37 @@ sample-accurate; with streaming playback it can be some 30 ms off, as the
 position of streaming audio is reported less precisely. A browser tab in the
 background can delay or drop clicks.
 
+### Key and chords
+
+The same analysis finds the song's key and a chord timeline, from the stems
+without the drums (bass, piano and other, with the vocals quieter). Having
+stems helps here: percussion is the main source of noise when telling notes
+apart. The tuning is measured first, so songs tuned to A = 432 Hz or a little
+off still work.
+
+- **Key chip:** shows the key, and the key heard with the key shift (for
+  example "A minor → B minor (+2)"). The key − / + buttons name the key they
+  lead to. The chip opens a panel with the second most likely key (often the
+  relative major or minor), a list to set the key yourself, *Show as
+  original / transposed* for the chord names, and the exports.
+- **Chord display:** the chord at the playhead, large, and the next one with
+  the beats to go ("→ F in 2").
+- **Chord lane:** under the bar ruler, a box per chord, aligned with the
+  waveforms. Click a box to go to it; double-click it to loop it.
+- **Export:** *Export chords (.txt)* writes a chord sheet, four bars a line
+  (`| Am    | F     | C     | G     |`), named as shown. *Export .lab* writes
+  `start end label` lines (MIREX format, such as `A:min`) for DAWs and
+  analysis tools.
+
+Accuracy: chords are simplified to major and minor triads (with inversions
+such as C/E when the bass makes them clear); sevenths, suspended and
+diminished chords show as their nearest triad. A key can be confused with
+its relative major or minor (shown as the alternative) or a neighbour on the
+circle of fifths; set it in the panel if so. Modal, atonal or very sparse
+music shows *Key unclear*. A key change held for 16 bars or more is listed in
+the panel. Screen readers don't announce every chord change unless *Announce
+chord changes* is ticked.
+
 Keyboard shortcuts on a project page (not while typing in a field):
 
 | Key | Action |
