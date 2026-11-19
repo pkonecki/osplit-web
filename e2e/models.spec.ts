@@ -60,7 +60,7 @@ test("defaults to Demucs with WebGPU and says it is slower", async ({ page }) =>
   await expect(status(page)).toHaveText("WebGPU: available");
   await expect(demucs(page)).toHaveClass(/selected/);
   await expect(demucs(page)).toContainText("6 stems · better, slower · 115 MB");
-  await expect(page.locator(".model-hint")).toContainText("takes several times longer");
+  await expect(page.locator(".model-hint")).toContainText("takes longer");
   // Demucs has one quality.
   await expect(page.locator('[data-action="quality"]')).toHaveCount(0);
   await expect(page.locator('[data-action="separate"]')).toHaveText("Separate six stems");

@@ -132,7 +132,7 @@ function renderModelPicker(project: Project, gpu: GpuSupport, busy: boolean): st
     }</small></button>`;
   const hint = model === "htdemucs-6s"
     ? demucsOk
-      ? "Demucs separates better than Spleeter but takes several times longer. Its piano stem is weak (its authors say so)."
+      ? "Demucs separates better than Spleeter but takes longer: about 1.2× Spleeter High quality on a desktop GPU, more on weaker ones. Its piano stem is weak (its authors say so)."
       : "Demucs needs WebGPU, which this browser does not offer. Choose Spleeter to separate here; the saved stems stay."
     : "Spleeter is fast and runs on any device.";
   return `

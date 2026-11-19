@@ -1,28 +1,29 @@
 # Plan: add the Demucs v4 6-stem model (`htdemucs_6s`)
 
-Status: implemented; ships the **FP32** model since November 2026, while bad
-stems seen on a real GPU with the FP16 model are investigated (see "Before
-release").
+Status: implemented with the **FP32** model, checked on a real GPU (see
+"Before release"); only the memory measurement is left.
 
 ## Before release
 
 Not possible in the cloud environment used for the implementation, which has
-no GPU (SwiftShader lacks `shader-f16`):
+no GPU (SwiftShader lacks `shader-f16`). Real-device checks, November 2026, on
+a Radeon RX 7800 (16 GB) with the latest Firefox:
 
-1. **Done, failed:** the FP16 model gave wrong stems on a real WebGPU device.
+1. **FP16 failed, FP32 works.** The FP16 model gave wrong stems on the GPU.
    The app now ships the FP32 export (`models/htdemucs_6s/htdemucs_6s.onnx`,
    114.6 MB, SHA-256 `0a06c19f…`, 84.8 dB SNR against `demucs.apply_model`), and
-   Demucs needs WebGPU but no longer `shader-f16`. Next: separate the same song
-   with FP32 on that device.
-   - Good stems: FP16 numerics on the GPU were the cause. Keep FP32, or try
-     FP16 again with layers kept in FP32 (`--fp32-ops`).
-   - Still wrong: the cause is outside the precision, e.g. an ONNX Runtime
-     WebGPU kernel or the app around the model. The TypeScript pipeline with
-     the FP32 graph on WASM matches the Python reference (51–60 dB, Step 0
-     results), so compare WebGPU against WASM for one segment next.
-2. Time it against Spleeter on the same track; replace "several times longer"
-   in the hint (`src/view/detail.ts`) with the measured ratio.
-3. Measure memory (60 s and 5 min tracks) and correct `DEMUCS_SEGMENT_BYTES`
+   Demucs needs WebGPU but no longer `shader-f16`. With it, the same song gave
+   correct stems and the GPU stayed up, so FP16 arithmetic on the GPU was the
+   cause (the CPU check in Step 0 could not show it: ONNX Runtime's CPU backend
+   accumulates in FP32). An FP16 model could come back later with the
+   overflowing layers kept in FP32 (`--fp32-ops`), checked on a GPU.
+2. **Timing:** Demucs 43 s, Spleeter High quality (FP32) 35 s on the same
+   song, about 1.2×; the hint and README say so. Weaker GPUs will differ.
+3. **Browser GPU crashes:** earlier runs (with the FP16 model) left the
+   browser with WebGPU turned off until it was restarted, as browsers do
+   after their GPU process crashes. Not seen with FP32. `src/gpu.ts` logs why
+   detection fails.
+4. **Left:** measure memory (60 s and 5 min tracks) and correct `DEMUCS_SEGMENT_BYTES`
    in `src/memory.ts`.
 
 ## Implementation notes
