@@ -19,8 +19,9 @@ import { holdTimelineFollow, laneTime, setTimelineView, timelineView } from "./t
  * (while the loop is on), and on the ruler dragging inside the loop moves
  * the whole loop; dragging anywhere else moves along the track when zoomed
  * in; two fingers pinch to zoom. A press without movement stays a
- * click, which seeks. Ctrl/⌘ + wheel (or a trackpad pinch) zooms, and a
- * sideways wheel moves along. A plain wheel scrolls the page.
+ * click, which seeks, wherever it is on a lane (on a loop edge too).
+ * Ctrl/⌘ + wheel (or a trackpad pinch) zooms, and a sideways wheel moves
+ * along. A plain wheel scrolls the page.
  *
  * Overview: a plain wheel zooms; dragging moves the window in view (a press
  * outside it centres it there first).
@@ -106,10 +107,9 @@ export function installTimelineInput(root: HTMLElement, callbacks: TimelineCallb
   let scrollTime = 0;
 
   const end = () => {
-    // A drag, a pinch, or a press on a loop edge doesn't seek; a click
-    // inside the loop on the ruler still does.
-    const click = drag?.kind === "pan" || (drag?.kind === "edge" && drag.edge === "both");
-    if (drag && (!click || ("moved" in drag && drag.moved))) suppressClick = true;
+    // A drag or a pinch doesn't seek; a press without movement on a lane
+    // stays a click, which seeks (on a loop edge too).
+    if (drag && (drag.kind === "pinch" || drag.moved)) suppressClick = true;
     if (drag?.kind === "edge" && drag.moved) callbacks.commit(drag.loop);
     drag = null;
     cancelAnimationFrame(scrollFrame);
@@ -215,11 +215,8 @@ export function installTimelineInput(root: HTMLElement, callbacks: TimelineCallb
         lastX: event.clientX,
         lastEvent: event,
       };
-      if (edge !== "both") {
-        lane!.setPointerCapture(event.pointerId);
-        holdTimelineFollow(true);
-        event.preventDefault();
-      }
+      // Keeps the browser from selecting text or scrolling at an edge.
+      if (edge !== "both") event.preventDefault();
       return;
     }
     drag = {
@@ -253,13 +250,10 @@ export function installTimelineInput(root: HTMLElement, callbacks: TimelineCallb
       }
       case "edge":
         if (!drag.moved) {
-          // Moving the whole loop starts after a few pixels, so a click
-          // inside it still seeks.
-          if (drag.edge === "both") {
-            if (Math.abs(event.clientX - drag.startX) < DRAG_THRESHOLD) return;
-            drag.element.setPointerCapture(event.pointerId);
-            holdTimelineFollow(true);
-          }
+          // Dragging starts after a few pixels, so a click still seeks.
+          if (Math.abs(event.clientX - drag.startX) < DRAG_THRESHOLD) return;
+          drag.element.setPointerCapture(event.pointerId);
+          holdTimelineFollow(true);
         }
         drag.moved = true;
         drag.lastX = event.clientX;

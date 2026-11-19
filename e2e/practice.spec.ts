@@ -204,6 +204,10 @@ test("speed, key and loop with decoded playback", async ({ page }) => {
   expect((await saved(page)).loop?.end).toBeCloseTo(4, 1);
   await page.mouse.click(onRuler(3), rulerMid);
   await expect.poll(() => position(page)).toBeCloseTo(3, 1);
+  // So does a click on a loop edge, which leaves the loop as it was.
+  await page.mouse.click(onRuler(2), rulerMid);
+  await expect.poll(() => position(page)).toBeCloseTo(2, 1);
+  expect((await saved(page)).loop).toMatchObject({ start: 2, end: 4 });
   await seekTo(page, 1.5);
 
   // Zoom: the overview marks the part in view.
