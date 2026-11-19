@@ -21,6 +21,17 @@ describe("separation memory estimate", () => {
     expect(fiveMinutes - oneMinute).toBe(4 * FRAMES_PER_MINUTE * (8 + 6 * 4));
   });
 
+  it("counts Demucs's sixth stem and its working memory", () => {
+    const spleeter = estimateSeparationBytes(FRAMES_PER_MINUTE, "spleeter-5", "fp16");
+    const demucs = estimateSeparationBytes(FRAMES_PER_MINUTE, "htdemucs-6s", "fp16");
+    // A smaller file, but a large working set per 7.8 s segment.
+    expect(demucs - spleeter).toBeGreaterThan(1000 * MB);
+    const perMinute = (model: "spleeter-5" | "htdemucs-6s") =>
+      estimateSeparationBytes(2 * FRAMES_PER_MINUTE, model, "fp16") -
+      estimateSeparationBytes(FRAMES_PER_MINUTE, model, "fp16");
+    expect(perMinute("htdemucs-6s") - perMinute("spleeter-5")).toBe(FRAMES_PER_MINUTE * 4);
+  });
+
   it("warns only past a quarter of the device memory", () => {
     expect(isLongForDevice(900 * MB, 4)).toBe(false);
     expect(isLongForDevice(1100 * MB, 4)).toBe(true);

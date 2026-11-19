@@ -1,6 +1,37 @@
 # Plan: add the Demucs v4 6-stem model (`htdemucs_6s`)
 
-Status: in progress. Step 0 done (see Step 0 results).
+Status: implemented, pending a check on a real WebGPU device (see "Before
+release").
+
+## Before release
+
+Not possible in the cloud environment used for the implementation, which has
+no GPU (SwiftShader lacks `shader-f16`):
+
+1. On a device with WebGPU and `shader-f16`, separate a full song with Demucs.
+   Compare the stems with the FP32 CPU reference
+   (`python scripts/export-htdemucs.py --audio song.wav`): if they differ
+   audibly or contain silence or noise, ship the FP32 file instead (decided):
+   re-export without `--fp16`, change `DEMUCS_KEY` and `DEMUCS_FILE_BYTES`, and
+   drop the `shader-f16` requirement in `src/gpu.ts`.
+2. Time it against Spleeter on the same track; replace "several times longer"
+   in the hint (`src/view/detail.ts`) with the measured ratio.
+3. Measure memory (60 s and 5 min tracks) and correct `DEMUCS_SEGMENT_BYTES`
+   in `src/memory.ts`.
+
+## Implementation notes
+
+- Display order of stems: vocals, guitar, piano, drums, bass, other
+  (`ALL_STEMS`); Spleeter's rows keep their order.
+- WebGPU status, model picker and Demucs hint: `src/view/detail.ts`; detection:
+  `src/gpu.ts`; while separating, the status line shows where the worker runs
+  (GPU or CPU).
+- Engine: `src/demucs.ts` (pipeline), `src/separators/` (Spleeter and Demucs
+  behind one interface), `src/inference.worker.ts` (provider choice, fallback
+  for Spleeter only, encoding).
+- Tests: `src/demucs.test.ts` (STFT, inverse STFT and the whole pipeline
+  against the NumPy reference), `src/gpu.test.ts`, storage tests for switching
+  models, `e2e/models.spec.ts` (picker with and without a stubbed WebGPU).
 
 ## Decisions
 
@@ -182,6 +213,12 @@ exporter, opset 17), checkpoint `5c90dfd2-34c22ccb.th` (SHA-256 starts with
   FP32). Check on a real WebGPU device before release: separate a track with
   Demucs and compare its stems with the FP32 CPU reference from the export
   script (`--audio`); if they differ audibly, ship FP32 (decided).
+
+- **TypeScript pipeline with the real weights:** `separateDemucs` with the
+  FP32 graph on ONNX Runtime Web's WASM backend (in Deno) matches the Python
+  reference on 15 s of music at 51–60 dB SNR per stem. On one CPU thread it
+  took about 16 s per 7.8 s segment, which confirms that Demucs on WASM would
+  be slower than real time.
 
 Fixtures for the TypeScript port: `src/__fixtures__/demucs/stft.json` (STFT
 values, inverse STFT of a sparse spectrum, and the whole pipeline with a

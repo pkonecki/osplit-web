@@ -59,6 +59,12 @@ jobs:
               exit 1
             fi
           done
+          # Demucs v4: one FP16 file.
+          count=$(find dist/models/htdemucs_6s -name '*.onnx' -size +1M | wc -l)
+          if [ "$count" -ne 1 ]; then
+            echo "::error::Expected 1 Demucs model over 1 MB in dist/models/htdemucs_6s, found $count"
+            exit 1
+          fi
           test -s dist/models/models.json
           ls dist/assets/*.wasm >/dev/null
           du -sh dist

@@ -16,7 +16,8 @@
     <h1>OSplit Web</h1>
     <p>Audio import, stem separation, playback, and export run in your browser. Source files, stems, projects, and selected ONNX models are stored locally in IndexedDB.</p>
     <h2>Browser requirements</h2>
-    <p>Use a current Chrome, Edge, Firefox, or Safari release. WebGPU is preferred when available; the WebAssembly CPU provider is used as a fallback. Model inference may be slow or exceed memory limits on mobile devices. The first run downloads about 98 MB for Low quality (FP16) or 197 MB for High quality (FP32), plus the ONNX Runtime. Browser storage limits vary.</p>
+    <p>Use a current Chrome, Edge, Firefox, or Safari release. Model inference may be slow or exceed memory limits on mobile devices. Browser storage limits vary.</p>
+    <p>Each project picks a separation model, and the project page shows whether WebGPU is available. <strong>Demucs v4</strong> gives six stems (vocals, guitar, piano, drums, bass, other) and better separation, but is several times slower than Spleeter and its piano stem is weak; it needs WebGPU with FP16 shader support and never runs on the CPU. The first run downloads 58 MB. <strong>Spleeter</strong> gives five stems and is fast on any device: WebGPU when available, otherwise the WebAssembly CPU provider. The first run downloads about 98 MB for Low quality (FP16) or 197 MB for High quality (FP32). The ONNX Runtime is downloaded as well.</p>
     <h2>Background work</h2>
     <p>Processing runs in a worker while the app is open. Browsers can suspend or terminate tabs, so work is not guaranteed to continue after leaving or closing the app. A stopped task is marked interrupted and can be restarted; source audio and completed project data remain stored locally.</p>
     <h2>URL download limitations</h2>

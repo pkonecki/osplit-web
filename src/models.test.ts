@@ -2,9 +2,11 @@ import { IDBFactory } from "fake-indexeddb";
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  DEMUCS_KEY,
   loadModel,
   type ModelManifest,
   modelCacheKey,
+  modelFiles,
   parseModelManifest,
   resetModelManifest,
   sha256Hex,
@@ -83,6 +85,25 @@ describe("model list", () => {
     await expect(
       verifyModelBytes(KEY, MODEL.slice(1).buffer, entry),
     ).rejects.toThrow(/incomplete/);
+  });
+});
+
+describe("model files", () => {
+  it("lists one Spleeter file per stem and quality, and one Demucs file", () => {
+    expect(modelFiles("spleeter-5", "fp16").map((file) => file.key)).toEqual([
+      "fp16/vocals.fp16.onnx",
+      "fp16/piano.fp16.onnx",
+      "fp16/drums.fp16.onnx",
+      "fp16/bass.fp16.onnx",
+      "fp16/other.fp16.onnx",
+    ]);
+    expect(modelFiles("spleeter-5", "fp32")[0].key).toBe("fp32/vocals.onnx");
+    // Demucs ships FP16 only, whatever the project's quality.
+    for (const quality of ["fp16", "fp32"] as const) {
+      expect(modelFiles("htdemucs-6s", quality)).toEqual([
+        { key: DEMUCS_KEY, label: "Demucs" },
+      ]);
+    }
   });
 });
 

@@ -32,8 +32,8 @@ deno task test
 deno task build
 ```
 
-The build copies both model qualities (about 295 MB total) from this repository's
-`models/` folder into `dist/models`, with `models.json` listing each model's
+The build copies the models (about 353 MB total: both Spleeter qualities and
+the Demucs FP16 model) from this repository's `models/` folder into `dist/models`, with `models.json` listing each model's
 size and SHA-256. Models are downloaded and cached individually in the browser
 when first used; downloads are checked against `models.json`, and a model whose
 checksum changes is downloaded again.
@@ -71,9 +71,25 @@ requires HTTPS and the cross-origin isolation headers documented below.
 ## Browser and storage limitations
 
 Use a current Chrome, Edge, Firefox, or Safari release. Model inference may be
-slow or exceed memory limits on mobile devices. The first run downloads about
-98 MB for Low quality (FP16) or 197 MB for High quality (FP32), plus the ONNX
-Runtime. Browser storage limits vary.
+slow or exceed memory limits on mobile devices. Browser storage limits vary.
+
+Each project picks a separation model; the project page shows whether WebGPU
+is available:
+
+- **Demucs v4** (`htdemucs_6s`): six stems (vocals, guitar, piano, drums,
+  bass, other) and clearly better separation, but several times slower than
+  Spleeter, and its piano stem is weak. It needs WebGPU with FP16 shader
+  support (`shader-f16`) and never runs on the CPU; it is the default for new
+  projects where available. The first run downloads 58 MB.
+- **Spleeter**: five stems (vocals, piano, drums, bass, other), fast, on any
+  device: WebGPU when available, otherwise the WebAssembly CPU provider. The
+  first run downloads about 98 MB for Low quality (FP16) or 197 MB for High
+  quality (FP32).
+
+The ONNX Runtime is downloaded as well. Separating again with the other model
+replaces all of the project's stems. `scripts/export-htdemucs.py` converts
+Demucs to the ONNX file in `models/htdemucs_6s` and checks it; see
+`docs/htdemucs-6s-plan.md`.
 
 Processing runs in a worker while the app is open. Browsers can suspend or
 terminate tabs, so work is not guaranteed to continue after leaving or closing
