@@ -4,7 +4,7 @@ import {
   type ModelRecord,
   type Project,
   type Stem,
-  STEMS,
+  ALL_STEMS,
   type StoredBlob,
 } from "./types";
 
@@ -339,7 +339,7 @@ export async function writeProjectData(data: ProjectData): Promise<Project> {
     tx.objectStore(ANALYSIS).delete(id);
     tx.objectStore(PROJECTS).put(project);
     if (data.source) tx.objectStore(SOURCES).put({ ...data.source, id } satisfies StoredBlob);
-    for (const stem of STEMS) {
+    for (const stem of ALL_STEMS) {
       const blob = data.stems[stem];
       if (blob) {
         tx.objectStore(STEM_BLOBS).put(
@@ -394,11 +394,18 @@ export function getStem(
   );
 }
 
+/**
+ * Saves a separation's stems, replacing the project's previous ones: a
+ * different model may produce other stems (Demucs adds guitar), and none of
+ * the old ones may be left behind.
+ */
 export async function completeSeparation(
   projectId: string,
-  output: Record<Stem, Blob>,
-  peaks?: Record<Stem, Float32Array>,
+  output: Partial<Record<Stem, Blob>>,
+  peaks?: Partial<Record<Stem, Float32Array>>,
 ): Promise<Project> {
+  const stems = ALL_STEMS.filter((stem) => output[stem]);
+  if (stems.length === 0) throw new Error("The separation returned no stems.");
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(
@@ -415,16 +422,20 @@ export async function completeSeparation(
         reject(new Error("Project no longer exists."));
         return;
       }
-      STEMS.forEach((stem) => {
+      tx.objectStore(STEM_BLOBS).delete(projectStemRange(projectId));
+      tx.objectStore(PEAKS).delete(projectStemRange(projectId));
+      stems.forEach((stem) => {
+        const blob = output[stem]!;
         const value: StoredBlob = {
           id: `${projectId}:${stem}`,
-          blob: output[stem],
-          name: `${stem}.${audioExtension(output[stem])}`,
+          blob,
+          name: `${stem}.${audioExtension(blob)}`,
         };
         tx.objectStore(STEM_BLOBS).put(value);
-        if (peaks) {
+        const stemPeaks = peaks?.[stem];
+        if (stemPeaks) {
           tx.objectStore(PEAKS).put(
-            { id: `${projectId}:${stem}`, peaks: peaks[stem] } satisfies StoredPeaks,
+            { id: `${projectId}:${stem}`, peaks: stemPeaks } satisfies StoredPeaks,
           );
         }
       });
@@ -436,7 +447,12 @@ export async function completeSeparation(
         ...current,
         sourceRemoved: removeSource || current.sourceRemoved,
         status: "ready",
-        completedStems: [...STEMS],
+        completedStems: stems,
+        // Mute and solo refer to rows; drop those for stems that are gone.
+        mutedStems: current.mutedStems.filter((stem) => stems.includes(stem)),
+        soloStems: current.soloStems?.filter((track) =>
+          track === "click" || stems.includes(track)
+        ),
         errorMessage: null,
         taskProgress: 100,
         taskStage: "Separation complete",

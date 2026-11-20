@@ -2,9 +2,11 @@ import { IDBFactory } from "fake-indexeddb";
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  DEMUCS_KEY,
   loadModel,
   type ModelManifest,
   modelCacheKey,
+  modelFiles,
   parseModelManifest,
   resetModelManifest,
   sha256Hex,
@@ -18,6 +20,7 @@ import {
 } from "./storage";
 
 const KEY = "fp16/vocals.fp16.onnx";
+const FILE = { key: KEY, label: "vocals" };
 const MODEL = new TextEncoder().encode("pretend this is an ONNX model");
 
 async function entryFor(bytes: Uint8Array) {
@@ -85,13 +88,32 @@ describe("model list", () => {
   });
 });
 
+describe("model files", () => {
+  it("lists one Spleeter file per stem and quality, and one Demucs file", () => {
+    expect(modelFiles("spleeter-5", "fp16").map((file) => file.key)).toEqual([
+      "fp16/vocals.fp16.onnx",
+      "fp16/piano.fp16.onnx",
+      "fp16/drums.fp16.onnx",
+      "fp16/bass.fp16.onnx",
+      "fp16/other.fp16.onnx",
+    ]);
+    expect(modelFiles("spleeter-5", "fp32")[0].key).toBe("fp32/vocals.onnx");
+    // Demucs ships one FP32 file, whatever the project's quality.
+    for (const quality of ["fp16", "fp32"] as const) {
+      expect(modelFiles("htdemucs-6s", quality)).toEqual([
+        { key: DEMUCS_KEY, label: "Demucs" },
+      ]);
+    }
+  });
+});
+
 describe("loadModel", () => {
   it("downloads, verifies and caches under the checksum key", async () => {
     const entry = await entryFor(MODEL);
     const server = fakeServer({ [KEY]: entry }, { [KEY]: MODEL });
     const progress: number[] = [];
 
-    const bytes = await loadModel("fp16", "vocals", {
+    const bytes = await loadModel(FILE, {
       ...noProgress,
       onProgress: (fraction) => progress.push(fraction),
       fetchImpl: server.fetchImpl,
@@ -104,7 +126,7 @@ describe("loadModel", () => {
     // A second load comes from the cache: only the model list is fetched.
     const before = server.requests.length;
     resetModelManifest();
-    await loadModel("fp16", "vocals", { ...noProgress, fetchImpl: server.fetchImpl });
+    await loadModel(FILE, { ...noProgress, fetchImpl: server.fetchImpl });
     expect(server.requests.slice(before)).toEqual([
       expect.stringMatching(/models\.json$/),
     ]);
@@ -116,7 +138,7 @@ describe("loadModel", () => {
     corrupted[0] ^= 0xff;
     const server = fakeServer({ [KEY]: entry }, { [KEY]: corrupted });
     await expect(
-      loadModel("fp16", "vocals", { ...noProgress, fetchImpl: server.fetchImpl }),
+      loadModel(FILE, { ...noProgress, fetchImpl: server.fetchImpl }),
     ).rejects.toThrow(/corrupted/);
     expect(await latestModelVariant(KEY)).toBeUndefined();
   });
@@ -127,7 +149,7 @@ describe("loadModel", () => {
     const entry = await entryFor(MODEL);
     const server = fakeServer({ [KEY]: entry }, { [KEY]: MODEL });
 
-    await loadModel("fp16", "vocals", { ...noProgress, fetchImpl: server.fetchImpl });
+    await loadModel(FILE, { ...noProgress, fetchImpl: server.fetchImpl });
 
     expect(await getModel(KEY)).toBeUndefined();
     expect(await getModel(`${KEY}@old`)).toBeUndefined();
@@ -137,11 +159,11 @@ describe("loadModel", () => {
   it("uses the cached copy when the model list cannot be fetched", async () => {
     const entry = await entryFor(MODEL);
     const server = fakeServer({ [KEY]: entry }, { [KEY]: MODEL });
-    await loadModel("fp16", "vocals", { ...noProgress, fetchImpl: server.fetchImpl });
+    await loadModel(FILE, { ...noProgress, fetchImpl: server.fetchImpl });
 
     resetModelManifest();
     server.goOffline();
-    const bytes = await loadModel("fp16", "vocals", {
+    const bytes = await loadModel(FILE, {
       ...noProgress,
       fetchImpl: server.fetchImpl,
     });
@@ -152,7 +174,7 @@ describe("loadModel", () => {
     const server = fakeServer({}, {});
     server.goOffline();
     await expect(
-      loadModel("fp16", "vocals", { ...noProgress, fetchImpl: server.fetchImpl }),
+      loadModel(FILE, { ...noProgress, fetchImpl: server.fetchImpl }),
     ).rejects.toThrow(/Failed to fetch/);
   });
 
@@ -161,7 +183,7 @@ describe("loadModel", () => {
     const server = fakeServer({ [KEY]: entry }, { [KEY]: MODEL });
     let checks = 0;
     await expect(
-      loadModel("fp16", "vocals", {
+      loadModel(FILE, {
         onProgress: () => {},
         checkCancelled: () => {
           if (++checks > 1) throw new DOMException("cancelled", "AbortError");

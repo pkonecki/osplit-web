@@ -1,4 +1,9 @@
-import { DEFAULT_CLICK_VOLUME, type Project, type Track } from "./types";
+import {
+  DEFAULT_CLICK_VOLUME,
+  type Project,
+  stemLevel,
+  type Track,
+} from "./types";
 
 /** Soloed rows; projects saved before solo existed have none. */
 export function soloStems(project: Project): Track[] {
@@ -17,7 +22,7 @@ export function stemVolume(project: Project, track: Track): number {
   if (track === "click") {
     return project.clickOn ? project.clickVolume ?? DEFAULT_CLICK_VOLUME : 0;
   }
-  return project.mutedStems.includes(track) ? 0 : project.volumes[track];
+  return project.mutedStems.includes(track) ? 0 : stemLevel(project, track);
 }
 
 /** Adds `item` to `list` or removes it. */

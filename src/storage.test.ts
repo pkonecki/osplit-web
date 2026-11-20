@@ -21,7 +21,14 @@ import {
   replaceSource,
   saveProject,
 } from "./storage";
-import { type AnalysisRecord, newProject, STEMS } from "./types";
+import {
+  type AnalysisRecord,
+  MODEL_STEMS,
+  newProject,
+  type Stem,
+} from "./types";
+
+const STEMS = MODEL_STEMS["spleeter-5"];
 
 function analysis(projectId: string): AnalysisRecord {
   return {
@@ -43,10 +50,10 @@ beforeEach(async () => {
   globalThis.indexedDB = new IDBFactory();
 });
 
-function stems(label: string) {
+function stems(label: string, list: readonly Stem[] = STEMS) {
   return Object.fromEntries(
-    STEMS.map((stem) => [stem, new Blob([`${label}-${stem}`])]),
-  ) as Record<(typeof STEMS)[number], Blob>;
+    list.map((stem) => [stem, new Blob([`${label}-${stem}`])]),
+  ) as Record<Stem, Blob>;
 }
 
 async function text(blob: Blob | undefined) {
@@ -156,7 +163,7 @@ describe("project stems", () => {
     const project = await saveProject(newProject("peaks"));
     const peaks = Object.fromEntries(
       STEMS.map((stem, index) => [stem, Float32Array.from([index / 10, 0.5])]),
-    ) as Record<(typeof STEMS)[number], Float32Array>;
+    ) as Record<Stem, Float32Array>;
     await completeSeparation(project.id, stems("p"), peaks);
     expect((await getPeaks(project.id)).drums).toEqual(peaks.drums);
     await putPeaks(project.id, "vocals", Float32Array.from([1]));
@@ -166,6 +173,34 @@ describe("project stems", () => {
     await completeSeparation(project.id, stems("q"), peaks);
     await deleteProject(project.id);
     expect(await getPeaks(project.id)).toEqual({});
+  });
+
+  it("replaces every stem when the model changes", async () => {
+    const project = await saveProject({
+      ...newProject("models"),
+      mutedStems: ["guitar", "bass"],
+      soloStems: ["guitar", "click"],
+    });
+    const demucs = await completeSeparation(
+      project.id,
+      stems("d", MODEL_STEMS["htdemucs-6s"]),
+    );
+    expect(demucs.completedStems).toEqual([
+      "vocals",
+      "guitar",
+      "piano",
+      "drums",
+      "bass",
+      "other",
+    ]);
+    expect(await text((await getStem(project.id, "guitar"))?.blob)).toBe("d-guitar");
+
+    const spleeter = await completeSeparation(project.id, stems("s"));
+    expect(spleeter.completedStems).toEqual(["vocals", "piano", "drums", "bass", "other"]);
+    expect(await getStem(project.id, "guitar")).toBeUndefined();
+    expect(await text((await getStem(project.id, "bass"))?.blob)).toBe("s-bass");
+    expect(spleeter.mutedStems).toEqual(["bass"]);
+    expect(spleeter.soloStems).toEqual(["click"]);
   });
 
   it("deletes the source after separation only when asked", async () => {

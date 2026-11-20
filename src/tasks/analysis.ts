@@ -282,7 +282,9 @@ async function prepareSignals(
   report("Decoding stems", 5);
   const drums = await decode("drums");
   const bass = await decode("bass") ?? undefined;
+  // Pitched stems: Spleeter has piano and other; Demucs adds guitar.
   let harmonic = await decode("piano");
+  harmonic = await decode("guitar", harmonic ?? undefined);
   harmonic = await decode("other", harmonic ?? undefined);
   const vocals = await decode("vocals");
   const parts = [drums, bass, harmonic, vocals].filter((part): part is Float32Array => !!part);

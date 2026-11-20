@@ -3,11 +3,17 @@ import { isNeutral } from "../practice";
 import { soloStems, stemVolume } from "../mixing";
 import { playerTime } from "../player";
 import { projectGrid } from "../tasks/analysis";
-import { DEFAULT_CLICK_VOLUME, type Project, STEM_LABELS, STEMS } from "../types";
+import {
+  ALL_STEMS,
+  DEFAULT_CLICK_VOLUME,
+  type Project,
+  STEM_LABELS,
+  stemLevel,
+} from "../types";
 import { formatTime } from "./format";
 import { chordLaneMarkup, chordNowMarkup } from "./harmony";
 import { loopRulerMarkup, practiceMarkup } from "./practice";
-import { updatePlayheads, waveformMarkup } from "./waveforms";
+import { overviewMarkup, updatePlayheads, waveformMarkup } from "./waveforms";
 
 export function renderMixer(project: Project): string {
   const time = playerTime();
@@ -45,11 +51,12 @@ export function renderMixer(project: Project): string {
       </div>
       ${practiceMarkup(project)}
       ${chordNowMarkup()}
+      ${overviewMarkup()}
       ${loopRulerMarkup()}
       ${chordLaneMarkup()}
       <div class="stem-list">
         ${
-    STEMS.filter((stem) => project.completedStems.includes(stem)).map((
+    ALL_STEMS.filter((stem) => project.completedStems.includes(stem)).map((
       stem,
     ) => `
           <div class="stem-control" tabindex="0" data-stem-row="${stem}" aria-label="${
@@ -57,7 +64,7 @@ export function renderMixer(project: Project): string {
     } (M to mute, S to solo)">
             <span class="stem-label">${STEM_LABELS[stem]}</span>
             <input type="range" min="0" max="1" step="0.01" value="${
-      project.volumes[stem]
+      stemLevel(project, stem)
     }" data-action="volume" data-stem="${stem}" aria-label="${
       STEM_LABELS[stem]
     } volume" ${project.mutedStems.includes(stem) ? "disabled" : ""} />

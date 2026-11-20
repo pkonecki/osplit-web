@@ -9,10 +9,11 @@ import {
   isLongForDevice,
   LONG_TRACK_WARNING,
 } from "../memory";
+import { detectGpu, modelAvailable } from "../gpu";
 import type { InferenceRequest, InferenceResponse } from "../messages";
 import { requestRender, showMessage, state } from "../state";
 import { completeSeparation, getSource, updateProjectTask } from "../storage";
-import type { Project, Stem } from "../types";
+import { type Project, projectModel, type Stem } from "../types";
 import { updateProgressDisplay } from "../view/detail";
 import { describeError, workerCrash } from "../view/format";
 import { analyzeProject, forgetAnalysis } from "./analysis";
@@ -33,10 +34,17 @@ export async function separateProject(project: Project): Promise<void> {
   if (!source) {
     throw new Error("Import a local audio file before separating stems.");
   }
+  const model = projectModel(project);
+  if (!modelAvailable(model, await detectGpu())) {
+    throw new Error(
+      "Demucs needs WebGPU, which this browser does not offer. Choose Spleeter to separate here.",
+    );
+  }
   state.working = true;
   abortSeparation = false;
   state.progress = 0;
   state.progressLabel = "Preparing audio";
+  state.provider = null;
   const persist = progressPersister(project.id);
   acquireWakeLock();
 
@@ -55,7 +63,7 @@ export async function separateProject(project: Project): Promise<void> {
     const frameCount = samples.length / CHANNELS;
     if (
       isLongForDevice(
-        estimateSeparationBytes(frameCount, project.quality),
+        estimateSeparationBytes(frameCount, model, project.quality),
         (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
       )
     ) {
@@ -68,9 +76,10 @@ export async function separateProject(project: Project): Promise<void> {
     );
     inferenceWorker = worker;
 
-    const result = await new Promise<
-      { stems: Record<Stem, Blob>; peaks: Record<Stem, Float32Array> }
-    >((resolve, reject) => {
+    const result = await new Promise<{
+      stems: Partial<Record<Stem, Blob>>;
+      peaks: Partial<Record<Stem, Float32Array>>;
+    }>((resolve, reject) => {
       rejectInference = reject;
       worker.onmessage = (event: MessageEvent<InferenceResponse>) => {
         const message = event.data;
@@ -80,6 +89,9 @@ export async function separateProject(project: Project): Promise<void> {
           state.progressLabel = message.stage;
           persist.report(message.progress, message.stage);
           updateProgressDisplay();
+        } else if (message.type === "provider") {
+          state.provider = message.provider;
+          void requestRender();
         } else if (message.type === "complete") {
           resolve({ stems: message.stems, peaks: message.peaks });
         } else if (message.type === "cancelled") {
@@ -92,13 +104,16 @@ export async function separateProject(project: Project): Promise<void> {
         reject(
           workerCrash(
             event,
-            "The separation stopped unexpectedly. This is usually the browser running out of memory: try Low quality or a shorter track.",
+            model === "htdemucs-6s"
+              ? "The separation stopped unexpectedly. This is usually the browser running out of memory: try Spleeter or a shorter track."
+              : "The separation stopped unexpectedly. This is usually the browser running out of memory: try Low quality or a shorter track.",
           ),
         );
       worker.postMessage(
         {
           type: "separate",
           id,
+          model,
           quality: project.quality,
           samples,
         } satisfies InferenceRequest,
@@ -135,6 +150,7 @@ export async function separateProject(project: Project): Promise<void> {
     inferenceWorker = undefined;
     rejectInference = undefined;
     state.working = false;
+    state.provider = null;
     releaseWakeLock();
     await requestRender();
   }

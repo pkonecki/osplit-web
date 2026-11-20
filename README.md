@@ -32,8 +32,8 @@ deno task test
 deno task build
 ```
 
-The build copies both model qualities (about 295 MB total) from this repository's
-`models/` folder into `dist/models`, with `models.json` listing each model's
+The build copies the models (about 410 MB total: both Spleeter qualities and
+the Demucs model) from this repository's `models/` folder into `dist/models`, with `models.json` listing each model's
 size and SHA-256. Models are downloaded and cached individually in the browser
 when first used; downloads are checked against `models.json`, and a model whose
 checksum changes is downloaded again.
@@ -71,9 +71,26 @@ requires HTTPS and the cross-origin isolation headers documented below.
 ## Browser and storage limitations
 
 Use a current Chrome, Edge, Firefox, or Safari release. Model inference may be
-slow or exceed memory limits on mobile devices. The first run downloads about
-98 MB for Low quality (FP16) or 197 MB for High quality (FP32), plus the ONNX
-Runtime. Browser storage limits vary.
+slow or exceed memory limits on mobile devices. Browser storage limits vary.
+
+Each project picks a separation model; the project page shows whether WebGPU
+is available:
+
+- **Demucs v4** (`htdemucs_6s`): six stems (vocals, guitar, piano, drums,
+  bass, other) and clearly better separation, but slower than Spleeter (about
+  1.2× Spleeter High quality on a Radeon RX 7800, more on weaker GPUs), and its
+  piano stem is weak. It needs WebGPU and never runs on the
+  CPU; it is the default for new projects where WebGPU is available. The first
+  run downloads 115 MB.
+- **Spleeter**: five stems (vocals, piano, drums, bass, other), fast, on any
+  device: WebGPU when available, otherwise the WebAssembly CPU provider. The
+  first run downloads about 98 MB for Low quality (FP16) or 197 MB for High
+  quality (FP32).
+
+The ONNX Runtime is downloaded as well. Separating again with the other model
+replaces all of the project's stems. `scripts/export-htdemucs.py` converts
+Demucs to the ONNX file in `models/htdemucs_6s` and checks it; see
+`docs/htdemucs-6s-plan.md`.
 
 Processing runs in a worker while the app is open. Browsers can suspend or
 terminate tabs, so work is not guaranteed to continue after leaving or closing
@@ -122,10 +139,19 @@ The project player can slow down or speed up a track (50–150%) without
 changing its pitch, shift its key (±12 semitones) without changing its speed,
 and repeat an A–B loop. Speed, key and loop are saved with each project.
 
-- **Loop:** set the start (A) and end (B) at the playhead, or drag across a
-  waveform or the strip above the stems to draw a loop. Drag its handles to
-  adjust it; a click still seeks. Seeking after the loop end jumps to the
-  loop start.
+- **Loop:** the Loop button (or `L`) loops 4 bars from the playhead (4 s
+  without a beat grid) when there is no loop, and otherwise turns it on or
+  off. A and B set the start and end at the playhead. While the loop is on,
+  drag its edges on the ruler, chords or waveforms to adjust it, or drag
+  inside it on the bar ruler to move it, keeping its length; a click still
+  seeks. Seeking after the loop end jumps to the loop start.
+- **Zoom:** the overview strip above the ruler shows the whole track and the
+  part in view. Scroll on it to zoom, and drag it to move along. On the
+  lanes, drag to move along, Ctrl/⌘ + scroll or pinch to zoom, and scroll
+  sideways to move along; a plain scroll still scrolls the page. The
+  buttons beside the overview zoom in and out, show the whole track, or
+  frame the loop. While playing, the view jumps ahead when the playhead
+  reaches its edge.
 - **Export:** with *Mix with speed, key & loop* ticked in the mixer, the
   exported mix (alone or in the zip) uses the project's speed and key, and
   covers only the loop when it is on. Stem exports are never changed.
@@ -332,8 +358,8 @@ docker run --detach --name osplit-web --publish 8080:8080 --restart unless-stopp
 
 The container serves HTTP. Put it behind a TLS reverse proxy or load balancer
 for public production use. Port 8080 is available for local smoke testing at
-`http://localhost:8080`. The build context/image includes roughly 295 MB of
-ONNX models, in addition to the ONNX Runtime WASM asset and yt-dlp wheel.
+`http://localhost:8080`. The build context/image includes the ONNX models
+(about 410 MB), in addition to the ONNX Runtime WASM asset and yt-dlp wheel.
 
 ## Models
 
@@ -351,8 +377,20 @@ publishes next to the models. If you use OSplit in research, cite Spleeter:
 > "Spleeter: a fast and efficient music source separation tool with
 > pre-trained models." *Journal of Open Source Software*, 5(50), 2154, 2020.
 
+The Demucs model is the pretrained `htdemucs_6s` model of
+[Demucs v4](https://github.com/facebookresearch/demucs) by Meta AI Research,
+converted to ONNX in full precision (FP32) by
+[`scripts/export-htdemucs.py`](./scripts/export-htdemucs.py). It produces six
+stems (vocals, guitar, piano, drums, bass, other) over the full frequency
+range. Demucs is released under the MIT License by Meta Platforms; see
+[`models/LICENSE-DEMUCS`](./models/LICENSE-DEMUCS). If you use it in research,
+cite Demucs v4:
+
+> Simon Rouard, Francisco Massa, Alexandre Défossez. "Hybrid Transformers for
+> Music Source Separation." *ICASSP 2023*.
+
 ## License
 
 The OSplit Web code is released under the [MIT License](./LICENSE). The models
-are covered by the Spleeter license above. Pitch shifting uses Signalsmith
+are covered by the Spleeter and Demucs licenses above. Pitch shifting uses Signalsmith
 Stretch by Geraint Luff, released under the MIT License.

@@ -23,7 +23,11 @@ import {
   saveProject,
   writeProjectData,
 } from "./storage";
-import { type AnalysisRecord, newProject, type Stem, STEMS } from "./types";
+import { type AnalysisRecord, MODEL_STEMS, newProject, type Stem } from "./types";
+
+/** Spleeter's five stems: the default model's. */
+const STEMS = MODEL_STEMS["spleeter-5"];
+const DEMUCS = MODEL_STEMS["htdemucs-6s"];
 import { createZip, readZip, type ZipEntry } from "./zip";
 
 beforeEach(async () => {
@@ -36,17 +40,14 @@ function flac(label: string): Blob {
   return new Blob(["fLaC", label], { type: "audio/flac" });
 }
 
-function stems(label: string): Record<Stem, Blob> {
-  return Object.fromEntries(STEMS.map((stem) => [stem, flac(`${label}-${stem}`)])) as Record<
-    Stem,
-    Blob
-  >;
+function stems(label: string, set: readonly Stem[] = STEMS): Partial<Record<Stem, Blob>> {
+  return Object.fromEntries(set.map((stem) => [stem, flac(`${label}-${stem}`)]));
 }
 
-function peaks(): Record<Stem, Float32Array> {
+function peaks(): Partial<Record<Stem, Float32Array>> {
   return Object.fromEntries(
     STEMS.map((stem, i) => [stem, Float32Array.from([0, 0.25 * i, 0.5, 1])]),
-  ) as Record<Stem, Float32Array>;
+  );
 }
 
 function analysis(projectId: string): AnalysisRecord {
@@ -216,6 +217,37 @@ describe("project files", () => {
     expect(data.project.completedStems).toEqual([]);
     expect(data.analysis).toBeUndefined();
     expect(data.project.status).toBe("ready");
+  });
+
+  it("round-trips a Demucs project with its six stems", async () => {
+    const project = await saveProject({
+      ...newProject("Six", "htdemucs-6s"),
+      volumes: { guitar: 0.3 },
+    });
+    await replaceSource(project, new Blob(["src"]), "a.wav");
+    await completeSeparation(project.id, stems("d", DEMUCS));
+    const data = await readProjectFile(await exported(project.id));
+    expect(data.project).toMatchObject({
+      model: "htdemucs-6s",
+      completedStems: [...DEMUCS],
+      volumes: { guitar: 0.3 },
+      status: "ready",
+    });
+    // Stems without a stored volume stay without one (full volume).
+    expect(data.project.volumes.vocals).toBeUndefined();
+    expect(await data.stems.guitar?.text()).toBe("fLaCd-guitar");
+  });
+
+  it("drops a Demucs project's stems when guitar is missing", async () => {
+    const project = await saveProject(newProject("Six", "htdemucs-6s"));
+    await replaceSource(project, new Blob(["src"]), "a.wav");
+    await completeSeparation(project.id, stems("d", DEMUCS));
+    const file = await withManifest(await exported(project.id), (manifest) => {
+      delete manifest.stems.guitar;
+    });
+    const data = await readProjectFile(file);
+    expect(data.project.completedStems).toEqual([]);
+    expect(data.stems).toEqual({});
   });
 
   it("keeps both projects with a copy under a new id", async () => {

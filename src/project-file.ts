@@ -2,17 +2,20 @@ import { AUDIO_MIME, detectAudioFormat } from "./audio-format";
 import { clampSemitones, clampSpeed } from "./practice";
 import type { ProjectData } from "./storage";
 import {
+  ALL_STEMS,
   type AnalysisRecord,
   type ChordSegment,
   type GridEdits,
   type KeyEstimate,
+  MODEL_IDS,
+  MODEL_STEMS,
   type Modulation,
   type MusicalKey,
   newProject,
   type Project,
   type ProjectLoop,
+  projectModel,
   type Stem,
-  STEMS,
   type Track,
 } from "./types";
 import { safeFileName } from "./view/format";
@@ -26,7 +29,8 @@ import { crc32OfBlob, createZip, readZip, type ZipEntry } from "./zip";
  *
  *   osplit.json          manifest: format, version, project, analysis
  *   source/<name>        the source audio, when it was kept
- *   stems/<stem>.flac    each separated stem (.wav for older projects)
+ *   stems/<stem>.flac    each separated stem (.wav for older projects); which
+ *                        stems depends on the project's model
  *   peaks/<stem>.f32     waveform overviews, little-endian float32
  *   analysis/beats.f32   beat times, little-endian float32
  *
@@ -97,7 +101,7 @@ export async function createProjectFile(data: ProjectData): Promise<Blob> {
     manifest.source = { file, name: data.source.name, type: data.source.blob.type };
     entries.push({ name: file, data: data.source.blob });
   }
-  for (const stem of STEMS) {
+  for (const stem of ALL_STEMS) {
     const blob = data.stems[stem];
     if (blob) {
       const file = `stems/${stem}.${await detectAudioFormat(blob)}`;
@@ -165,7 +169,9 @@ export async function readProjectFile(file: Blob): Promise<ProjectData> {
   const peaks: Partial<Record<Stem, Float32Array>> = {};
   const stemPaths = isRecord(manifest.stems) ? manifest.stems : {};
   const peakPaths = isRecord(manifest.peaks) ? manifest.peaks : {};
-  for (const stem of STEMS) {
+  // The model decides which stems a finished separation has.
+  const expected = MODEL_STEMS[projectModel(project)];
+  for (const stem of expected) {
     const blob = await checked(stemPaths[stem]);
     if (blob) {
       let format;
@@ -180,9 +186,10 @@ export async function readProjectFile(file: Blob): Promise<ProjectData> {
     const values = peakData && await blobToFloats(peakData);
     if (values && stems[stem]) peaks[stem] = values;
   }
-  // Stems come as a set of five: a partial set is a separation that didn't finish.
-  const complete = STEMS.every((stem) => stems[stem]);
-  project.completedStems = complete ? [...STEMS] : [];
+  // Stems come as the model's full set: a partial set is a separation that
+  // didn't finish.
+  const complete = expected.every((stem) => stems[stem]);
+  project.completedStems = complete ? [...expected] : [];
 
   let source: ProjectData["source"];
   if (isRecord(manifest.source) && typeof manifest.source.name === "string") {
@@ -249,7 +256,7 @@ function unit(value: unknown, fallback: number): number {
   return isNumber(value) ? Math.max(0, Math.min(1, value)) : fallback;
 }
 
-function tracks(value: unknown, allowed: readonly Track[]): Track[] {
+function tracks<T extends Track>(value: unknown, allowed: readonly T[]): T[] {
   return Array.isArray(value) ? allowed.filter((track) => value.includes(track)) : [];
 }
 
@@ -265,12 +272,16 @@ function readProject(value: unknown): Project {
   if (["empty", "ready", "processing", "interrupted", "failed"].includes(value.status)) {
     project.status = value.status;
   }
+  if (MODEL_IDS.includes(value.model)) project.model = value.model;
   if (value.quality === "fp32") project.quality = "fp32";
   if (isRecord(value.volumes)) {
-    for (const stem of STEMS) project.volumes[stem] = unit(value.volumes[stem], 1);
+    // A stem with no volume plays at full volume.
+    for (const stem of ALL_STEMS) {
+      if (value.volumes[stem] !== undefined) project.volumes[stem] = unit(value.volumes[stem], 1);
+    }
   }
-  project.mutedStems = tracks(value.mutedStems, STEMS) as Stem[];
-  project.soloStems = tracks(value.soloStems, [...STEMS, "click"]);
+  project.mutedStems = tracks(value.mutedStems, ALL_STEMS);
+  project.soloStems = tracks<Track>(value.soloStems, [...ALL_STEMS, "click"]);
   if (value.clickVolume !== undefined) project.clickVolume = unit(value.clickVolume, 0.8);
   if (typeof value.clickOn === "boolean") project.clickOn = value.clickOn;
   if (value.deleteSourceAfterSeparation === true) project.deleteSourceAfterSeparation = true;

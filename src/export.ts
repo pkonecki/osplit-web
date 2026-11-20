@@ -28,7 +28,7 @@ import {
 } from "./practice";
 import { getStem } from "./storage";
 import { cachedAnalysis, projectGrid } from "./tasks/analysis";
-import { type Project, STEM_LABELS, STEMS, type Track } from "./types";
+import { ALL_STEMS, type Project, STEM_LABELS, type Track } from "./types";
 import { safeFileName } from "./view/format";
 import { createZip, type ZipEntry } from "./zip";
 
@@ -166,7 +166,7 @@ export async function exportAll(project: Project): Promise<void> {
   const format = exportFormat();
   const base = safeFileName(project.name);
   const entries: ZipEntry[] = [];
-  for (const stem of STEMS.filter((s) => project.completedStems.includes(s))) {
+  for (const stem of ALL_STEMS.filter((s) => project.completedStems.includes(s))) {
     const stored = await getStem(project.id, stem);
     if (!stored) throw new Error(`The ${STEM_LABELS[stem]} stem is missing.`);
     entries.push({
@@ -221,7 +221,7 @@ function audibleClick(project: Project): { grid: BeatGrid; gain: number } | null
  */
 async function mixFile(project: Project, format: AudioFormat): Promise<Blob> {
   const click = audibleClick(project);
-  const active = STEMS.filter((stem) =>
+  const active = ALL_STEMS.filter((stem) =>
     project.completedStems.includes(stem) && stemVolume(project, stem) > 0
   );
   if (active.length === 0 && click) {

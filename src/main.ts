@@ -8,6 +8,7 @@ import {
   setExportAppliesPractice,
   setExportFormat,
 } from "./export";
+import { defaultModel, detectGpu } from "./gpu";
 import { enableIsolationReload } from "./isolation";
 import { appUrl } from "./paths";
 import {
@@ -39,6 +40,7 @@ import {
   clampSpeed,
   loopWithEnd,
   loopWithStart,
+  normalizeLoop,
   nudgeLoopEdge,
   projectSemitones,
   projectSpeed,
@@ -52,7 +54,7 @@ import {
   projectFileName,
   readProjectFile,
 } from "./project-file";
-import { onRender, showMessage, state } from "./state";
+import { onRender, requestRender, showMessage, state } from "./state";
 import {
   deleteProject,
   getProject,
@@ -97,6 +99,7 @@ import {
 import { installWakeLock } from "./tasks/wake-lock";
 import {
   type GridEdits,
+  type ModelId,
   newProject,
   type Project,
   type Quality,
@@ -106,7 +109,6 @@ import { renderDetail } from "./view/detail";
 import { choiceDialog, confirmDialog } from "./view/dialog";
 import { captureForm, restoreForm } from "./view/form-state";
 import { describeError, escapeHtml, formatBytes } from "./view/format";
-import { installLoopDrag, takeSuppressedClick } from "./view/loop-drag";
 import { updatePlayerDisplay } from "./view/mixer";
 import { updateLoopDisplay, updatePracticeDisplay } from "./view/practice";
 import { renderProjects } from "./view/projects";
@@ -121,11 +123,21 @@ import {
   setAnnounceChords,
   setKeyPanelOpen,
   songKey,
+  positionChordLane,
   updateChordNow,
   updateHarmonyDisplay,
 } from "./view/harmony";
 import { keyName } from "./analysis/spelling";
-import { setGridOverlay, showWaveforms, waveformSeekTime } from "./view/waveforms";
+import {
+  drawAll as drawTimeline,
+  followPlayheads,
+  setGridOverlay,
+  showWaveforms,
+  waveformSeekTime,
+} from "./view/waveforms";
+import { installTimelineInput, takeSuppressedClick } from "./view/timeline-input";
+import { onTimelineChange, setTimelineView, timelineView } from "./view/timeline";
+import { fullView, viewAround, viewTime, zoomView } from "./timeline";
 
 const root = document.querySelector<HTMLDivElement>("#app");
 if (!root) throw new Error("The app root element is missing.");
@@ -136,6 +148,13 @@ setPlayerTick(() => {
   updateMediaSession(playerTime());
   if (state.selectedProject) updateChordNow(state.selectedProject);
   followChords();
+  followPlayheads();
+});
+onTimelineChange(() => {
+  drawTimeline();
+  updateLoopDisplay(state.selectedProject);
+  if (state.selectedProject) updateHarmonyDisplay(state.selectedProject);
+  else positionChordLane();
 });
 setPlayerLoaded((project) => {
   void showWaveforms(project).catch(console.warn);
@@ -158,6 +177,13 @@ void start();
 
 async function start(): Promise<void> {
   registerServiceWorker();
+  // The model picker and new projects' default model depend on WebGPU.
+  // Detection is usually instant; do not hold the page for a slow one.
+  let gpuDetected = false;
+  const gpu = detectGpu().then(() => {
+    gpuDetected = true;
+  });
+  await Promise.race([gpu, new Promise((resolve) => setTimeout(resolve, 1500))]);
   try {
     state.projects = await listProjects();
     // A task still running in another tab holds its project's lock.
@@ -180,6 +206,10 @@ async function start(): Promise<void> {
     state.selectedProject =
       state.projects.find((project) => project.id === lastId) ?? null;
     await render();
+    // A slow detection re-renders once it is known. Only after the first
+    // render: a render started earlier, before the last project is selected,
+    // could finish last and replace the project page with the project list.
+    if (!gpuDetected) void gpu.then(() => requestRender());
     void requestPersistentStorage();
     installLaunchQueue((file) => void importFile(file));
     const shared = await takeSharedFile();
@@ -329,7 +359,7 @@ async function handleClick(event: Event): Promise<void> {
         const name =
           document.querySelector<HTMLInputElement>("#new-project-name")
             ?.value ?? "";
-        state.selectedProject = await saveProject(newProject(name));
+        state.selectedProject = await saveProject(newProject(name, defaultModel()));
         localStorage.setItem("osplit-web-last-project", state.selectedProject.id);
         state.screenMessage = "";
         await render();
@@ -379,6 +409,15 @@ async function handleClick(event: Event): Promise<void> {
       case "import":
         state.fileDialogTarget = "source";
         document.querySelector<HTMLInputElement>("#audio-file")?.click();
+        break;
+      case "model":
+        if (state.selectedProject && button.dataset.model) {
+          state.selectedProject = await saveProject({
+            ...state.selectedProject,
+            model: button.dataset.model as ModelId,
+          });
+          await render();
+        }
         break;
       case "quality":
         if (state.selectedProject && button.dataset.quality) {
@@ -437,7 +476,6 @@ async function handleClick(event: Event): Promise<void> {
       case "waveform-seek":
         // The end of a loop drag, or a press on a loop handle, doesn't seek.
         if (takeSuppressedClick()) break;
-        if ((event.target as HTMLElement).closest("[data-loop-handle]")) break;
         seekTo(waveformSeekTime(button, (event as MouseEvent).clientX));
         break;
       case "speed-step":
@@ -467,6 +505,9 @@ async function handleClick(event: Event): Promise<void> {
             button.dataset.edge === "start" ? "start" : "end",
           );
         }
+        break;
+      case "zoom":
+        zoomTimeline(button.dataset.zoom);
         break;
       case "loop-toggle":
         if (state.selectedProject) await toggleLoop(state.selectedProject);
@@ -515,6 +556,8 @@ async function handleClick(event: Event): Promise<void> {
         }
         break;
       case "chord-seek":
+        // The end of a drag along the lane doesn't seek.
+        if (takeSuppressedClick()) break;
         if (state.selectedProject) {
           const chord = chordForBox(state.selectedProject, button);
           if (chord) seekTo(chord.start);
@@ -623,8 +666,37 @@ function setLoopEdge(project: Project, edge: "start" | "end"): Promise<void> {
   return savePractice({ ...project, loop });
 }
 
+/** Zoom buttons: in, out, the whole track, or the loop. */
+function zoomTimeline(kind: string | undefined): void {
+  const { duration } = playerTime();
+  const view = timelineView(duration);
+  const loop = state.selectedProject?.loop;
+  if (kind === "in" || kind === "out") {
+    setTimelineView(zoomView(view, kind === "in" ? 2 : 0.5, viewTime(view, 0.5), duration));
+  } else if (kind === "loop" && loop) {
+    setTimelineView(viewAround(loop.start, loop.end, duration));
+  } else {
+    setTimelineView(fullView(duration));
+  }
+}
+
+/** Seconds looped by the Loop button when there is no beat grid. */
+const DEFAULT_LOOP_SECONDS = 4;
+
+/**
+ * The Loop button and L: turns the loop on or off, or makes one when there
+ * is none (4 bars from the playhead, or 4 s without a beat grid).
+ */
 function toggleLoop(project: Project): Promise<void> {
-  if (!project.loop) return Promise.resolve();
+  if (!project.loop) {
+    const { position, duration } = playerTime();
+    if (!duration) return Promise.resolve();
+    const grid = projectGrid(project.id);
+    const region = (grid ? barLoop(grid, position, 4, duration) : null) ??
+      normalizeLoop(position, position + DEFAULT_LOOP_SECONDS, duration);
+    if (!region) return Promise.resolve();
+    return savePractice({ ...project, loop: { ...region, enabled: true } });
+  }
   return savePractice({
     ...project,
     loop: { ...project.loop, enabled: !project.loop.enabled },
@@ -1013,9 +1085,8 @@ window.addEventListener("resize", () => {
     if (state.selectedProject) updateHarmonyDisplay(state.selectedProject);
   });
 });
-installLoopDrag(root, {
+installTimelineInput(root, {
   loop: () => state.selectedProject?.loop,
-  duration: () => playerTime().duration,
   preview: (loop) => {
     if (!state.selectedProject) return;
     void savePractice({ ...state.selectedProject, loop }, false).catch(showError);
