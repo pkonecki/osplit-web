@@ -325,14 +325,19 @@ export async function readProjectData(id: string): Promise<ProjectData | undefin
 
 /**
  * Saves a project and all its data, replacing whatever was stored under its
- * id, in one transaction: an import either lands whole or not at all.
+ * id, in one transaction: an import either lands whole or not at all. The
+ * project counts as changed now, unless `keepUpdatedAt` (a cloud download
+ * keeps the time of the change it brings).
  */
-export async function writeProjectData(data: ProjectData): Promise<Project> {
+export async function writeProjectData(
+  data: ProjectData,
+  { keepUpdatedAt = false } = {},
+): Promise<Project> {
   const db = await openDatabase();
   const id = data.project.id;
   return new Promise((resolve, reject) => {
     const tx = db.transaction([PROJECTS, SOURCES, STEM_BLOBS, PEAKS, ANALYSIS], "readwrite");
-    const project = { ...data.project, updatedAt: Date.now() };
+    const project = keepUpdatedAt ? data.project : { ...data.project, updatedAt: Date.now() };
     tx.objectStore(SOURCES).delete(id);
     tx.objectStore(STEM_BLOBS).delete(projectStemRange(id));
     tx.objectStore(PEAKS).delete(projectStemRange(id));
@@ -514,15 +519,20 @@ export function getAnalysis(projectId: string): Promise<AnalysisRecord | undefin
   );
 }
 
-/** Saves an analysis, unless its project was deleted meanwhile. */
+/**
+ * Saves an analysis, unless its project was deleted meanwhile. The project
+ * counts as changed, so cloud sync picks up grid and key corrections.
+ */
 export async function putAnalysis(record: AnalysisRecord): Promise<boolean> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const tx = db.transaction([PROJECTS, ANALYSIS], "readwrite");
-    const request = tx.objectStore(PROJECTS).getKey(record.projectId);
+    const request = tx.objectStore(PROJECTS).get(record.projectId);
     let saved = false;
     request.onsuccess = () => {
-      if (request.result === undefined) return;
+      const project = request.result as Project | undefined;
+      if (project === undefined) return;
+      tx.objectStore(PROJECTS).put({ ...project, updatedAt: Date.now() });
       tx.objectStore(ANALYSIS).put(record);
       saved = true;
     };

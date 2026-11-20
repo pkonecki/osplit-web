@@ -8,6 +8,18 @@ import {
   setExportAppliesPractice,
   setExportFormat,
 } from "./export";
+import {
+  autoSync,
+  connect as connectCloud,
+  connection as cloudConnection,
+  disconnect as disconnectCloud,
+  downloadRemote,
+  finishSignIn,
+  inCloud,
+  removeRemote,
+  setAutoSync,
+  syncNow,
+} from "./cloud/cloud";
 import { defaultModel, detectGpu } from "./gpu";
 import { enableIsolationReload } from "./isolation";
 import { appUrl } from "./paths";
@@ -205,12 +217,19 @@ async function start(): Promise<void> {
     const lastId = localStorage.getItem("osplit-web-last-project");
     state.selectedProject =
       state.projects.find((project) => project.id === lastId) ?? null;
+    // Back from a cloud storage sign-in page: show the project list.
+    const signedIn = await finishSignIn().catch((error: unknown) => describeError(error));
+    if (signedIn) {
+      state.selectedProject = null;
+      state.screenMessage = signedIn;
+    }
     await render();
     // A slow detection re-renders once it is known. Only after the first
     // render: a render started earlier, before the last project is selected,
     // could finish last and replace the project page with the project list.
     if (!gpuDetected) void gpu.then(() => requestRender());
     void requestPersistentStorage();
+    if (cloudConnection() && (signedIn || autoSync())) void runCloudSync(false);
     installLaunchQueue((file) => void importFile(file));
     const shared = await takeSharedFile();
     if (shared) await importFile(shared);
@@ -295,6 +314,40 @@ async function importProjectFile(file: File): Promise<void> {
   localStorage.setItem("osplit-web-last-project", project.id);
   state.screenMessage = `Imported "${project.name}".`;
   await render();
+}
+
+/** Ids replaced by the running cloud sync, to know what to re-render. */
+const cloudReplaced = new Set<string>();
+const cloudHooks = {
+  replacing(projectId: string) {
+    // The open project's stems are about to change under the player.
+    if (state.selectedProject?.id === projectId) releasePlayers();
+    forgetAnalysis(projectId);
+    cloudReplaced.add(projectId);
+  },
+};
+
+/**
+ * Syncs with the connected cloud storage. A sync the user asked for shows
+ * its outcome as the page message; an automatic one only in the cloud panel.
+ */
+async function runCloudSync(manual: boolean): Promise<void> {
+  cloudReplaced.clear();
+  const rerender = () =>
+    renderedView === "projects" ||
+    (state.selectedProject !== null && cloudReplaced.has(state.selectedProject.id));
+  try {
+    // The sync marks itself busy at once: show that.
+    const sync = syncNow(cloudHooks);
+    if (renderedView === "projects") await render();
+    const summary = await sync;
+    if (manual) state.screenMessage = summary;
+  } catch (error) {
+    if (manual) throw error;
+    console.warn("Automatic cloud sync failed.", error);
+  } finally {
+    if (rerender()) await render();
+  }
 }
 
 function registerServiceWorker(): void {
@@ -383,24 +436,95 @@ async function handleClick(event: Event): Promise<void> {
         localStorage.removeItem("osplit-web-last-project");
         state.screenMessage = "";
         await render();
+        // Changes made in the project go up when leaving it.
+        if (cloudConnection() && autoSync()) void runCloudSync(false);
         break;
-      case "delete":
-        if (
-          id &&
-          await confirmDialog(
+      case "delete": {
+        if (!id) break;
+        const cloud = cloudConnection();
+        let confirmed: boolean;
+        let alsoCloud = false;
+        if (cloud && inCloud(id)) {
+          const choice = await choiceDialog(
+            `Delete this project and all its source audio and stems? Its copy in ${cloud.label} can stay, to download again later.`,
+            [
+              { value: "local", label: "Delete from this device" },
+              { value: "everywhere", label: `Also delete from ${cloud.label}` },
+            ],
+          );
+          confirmed = choice !== null;
+          alsoCloud = choice === "everywhere";
+        } else {
+          confirmed = await confirmDialog(
             "Delete this project and all its source audio and stems?",
             "Delete project",
-          )
-        ) {
+          );
+        }
+        if (confirmed) {
+          if (alsoCloud) await removeRemote(id);
           await deleteProject(id);
           forgetAnalysis(id);
           if (state.selectedProject?.id === id) state.selectedProject = null;
           await render();
         }
         break;
+      }
       case "export-project": {
         const projectId = id ?? state.selectedProject?.id;
         if (projectId) await exportProjectFile(projectId);
+        break;
+      }
+      case "cloud-connect": {
+        const provider = button.dataset.provider;
+        if (provider !== "dropbox" && provider !== "onedrive") break;
+        if (state.working) {
+          throw new Error("Wait for the current task or cancel it: signing in leaves this page for a moment.");
+        }
+        await connectCloud(provider);
+        break;
+      }
+      case "cloud-sync":
+        await runCloudSync(true);
+        break;
+      case "cloud-disconnect": {
+        const cloud = cloudConnection();
+        if (
+          cloud &&
+          await confirmDialog(
+            `Disconnect ${cloud.label}? Projects stay on this device and in ${cloud.label}.`,
+            "Disconnect",
+          )
+        ) {
+          await disconnectCloud();
+          state.screenMessage = `Disconnected from ${cloud.label}.`;
+          await render();
+        }
+        break;
+      }
+      case "cloud-download":
+        if (id) {
+          try {
+            const download = downloadRemote(id, cloudHooks);
+            await render();
+            const name = await download;
+            state.screenMessage = `Downloaded "${name}".`;
+          } finally {
+            await render();
+          }
+        }
+        break;
+      case "cloud-remove": {
+        const cloud = cloudConnection();
+        if (
+          id && cloud &&
+          await confirmDialog(
+            `Remove this project from ${cloud.label}? It isn't on this device, so it will be gone.`,
+            "Remove",
+          )
+        ) {
+          await removeRemote(id);
+          await render();
+        }
         break;
       }
       case "import-project":
@@ -1106,6 +1230,7 @@ root.addEventListener("change", (event) => {
 root.addEventListener("change", (event) => {
   const input = event.target as HTMLInputElement;
   if (input.id === "audio-file") void handleFileChange(event);
+  if (input.id === "cloud-auto") setAutoSync(input.checked);
   if (input.id === "project-file") {
     const file = input.files?.[0];
     input.value = "";

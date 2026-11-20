@@ -19,7 +19,9 @@ import {
   putPeaks,
   putStem,
   replaceSource,
+  readProjectData,
   saveProject,
+  writeProjectData,
 } from "./storage";
 import {
   type AnalysisRecord,
@@ -290,6 +292,14 @@ describe("rhythm analysis", () => {
     expect(await getAnalysis(other.id)).toBeDefined();
   });
 
+  it("marks its project as changed, for cloud sync", async () => {
+    const project = await saveProject({ ...newProject("a") });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await putAnalysis(analysis(project.id));
+    const updated = (await listProjects()).find((item) => item.id === project.id)!;
+    expect(updated.updatedAt).toBeGreaterThan(project.updatedAt);
+  });
+
   it("is not saved for a project deleted meanwhile", async () => {
     expect(await putAnalysis(analysis("gone"))).toBe(false);
     expect(await getAnalysis("gone")).toBeUndefined();
@@ -303,6 +313,17 @@ describe("rhythm analysis", () => {
     await putAnalysis(analysis(project.id));
     await replaceSource(project, new Blob(["new"]), "new.wav");
     expect(await getAnalysis(project.id)).toBeUndefined();
+  });
+});
+
+describe("project data", () => {
+  it("keeps the time of the change a cloud download brings", async () => {
+    const project = { ...newProject("a"), updatedAt: 1_234 };
+    expect((await writeProjectData({ project, stems: {}, peaks: {} }, { keepUpdatedAt: true })).updatedAt)
+      .toBe(1_234);
+    expect((await readProjectData(project.id))?.project.updatedAt).toBe(1_234);
+    // An import counts as a change now.
+    expect((await writeProjectData({ project, stems: {}, peaks: {} })).updatedAt).toBeGreaterThan(1_234);
   });
 });
 

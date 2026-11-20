@@ -47,7 +47,7 @@ export const PROJECT_FILE_VERSION = 1;
 const MANIFEST = "osplit.json";
 const BEATS = "analysis/beats.f32";
 
-interface Manifest {
+export interface Manifest {
   format: typeof FORMAT;
   version: number;
   exportedAt: number;
@@ -85,9 +85,20 @@ async function blobToFloats(blob: Blob): Promise<Float32Array | null> {
   return values;
 }
 
-/** Builds the project file of a project's stored data. */
-export async function createProjectFile(data: ProjectData): Promise<Blob> {
-  const entries: ZipEntry[] = [];
+/** One file of a project: its path in the project file and its data. */
+export interface ProjectPart {
+  path: string;
+  data: Blob;
+}
+
+/**
+ * Splits a project's stored data into its manifest and the files it names,
+ * as a project file lays them out. Cloud sync stores the same parts.
+ */
+export async function projectParts(
+  data: ProjectData,
+): Promise<{ manifest: Manifest; parts: ProjectPart[] }> {
+  const parts: ProjectPart[] = [];
   const manifest: Manifest = {
     format: FORMAT,
     version: PROJECT_FILE_VERSION,
@@ -97,37 +108,46 @@ export async function createProjectFile(data: ProjectData): Promise<Blob> {
     peaks: {},
   };
   if (data.source) {
-    const file = `source/${safeFileName(data.source.name)}`;
-    manifest.source = { file, name: data.source.name, type: data.source.blob.type };
-    entries.push({ name: file, data: data.source.blob });
+    const path = `source/${safeFileName(data.source.name)}`;
+    manifest.source = { file: path, name: data.source.name, type: data.source.blob.type };
+    parts.push({ path, data: data.source.blob });
   }
   for (const stem of ALL_STEMS) {
     const blob = data.stems[stem];
     if (blob) {
-      const file = `stems/${stem}.${await detectAudioFormat(blob)}`;
-      manifest.stems[stem] = file;
-      entries.push({ name: file, data: blob });
+      const path = `stems/${stem}.${await detectAudioFormat(blob)}`;
+      manifest.stems[stem] = path;
+      parts.push({ path, data: blob });
     }
     const peaks = data.peaks[stem];
     if (peaks) {
-      const file = `peaks/${stem}.f32`;
-      manifest.peaks[stem] = file;
-      entries.push({ name: file, data: floatsToBlob(peaks) });
+      const path = `peaks/${stem}.f32`;
+      manifest.peaks[stem] = path;
+      parts.push({ path, data: floatsToBlob(peaks) });
     }
   }
   if (data.analysis) {
     const { beats, projectId: _, ...rest } = data.analysis;
     manifest.analysis = rest;
-    entries.push({ name: BEATS, data: floatsToBlob(beats) });
+    parts.push({ path: BEATS, data: floatsToBlob(beats) });
   }
-  entries.unshift({ name: MANIFEST, data: new Blob([JSON.stringify(manifest, null, 2)]) });
+  return { manifest, parts };
+}
+
+/** Builds the project file of a project's stored data. */
+export async function createProjectFile(data: ProjectData): Promise<Blob> {
+  const { manifest, parts } = await projectParts(data);
+  const entries: ZipEntry[] = [
+    { name: MANIFEST, data: new Blob([JSON.stringify(manifest, null, 2)]) },
+    ...parts.map((part) => ({ name: part.path, data: part.data })),
+  ];
   const zip = await createZip(entries);
   return new Blob([zip], { type: PROJECT_FILE_TYPE });
 }
 
 const NOT_A_PROJECT =
   "That file isn't an OSplit project. Choose a .osplit file exported from OSplit.";
-const DAMAGED = "The project file is damaged. Export it again on the other device.";
+export const DAMAGED = "The project file is damaged. Export it again on the other device.";
 
 /**
  * Reads a project file into project data ready to store. The project keeps
@@ -142,27 +162,43 @@ export async function readProjectFile(file: Blob): Promise<ProjectData> {
   }
   const manifestEntry = entries.get(MANIFEST);
   if (!manifestEntry) throw new Error(NOT_A_PROJECT);
-  let manifest: Manifest;
+  let manifest: unknown;
   try {
     manifest = JSON.parse(await manifestEntry.data.text());
   } catch {
     throw new Error(DAMAGED);
   }
-  if (!isRecord(manifest) || manifest.format !== FORMAT) throw new Error(NOT_A_PROJECT);
-  if (typeof manifest.version !== "number" || manifest.version > PROJECT_FILE_VERSION) {
-    throw new Error(
-      "This project was exported by a newer version of OSplit. Update OSplit (reload the page) to import it.",
-    );
-  }
-
-  /** The data at an archive path the manifest names, checked against its CRC. */
-  const checked = async (path: unknown): Promise<Blob | undefined> => {
-    if (typeof path !== "string") return undefined;
+  return readProjectParts(manifest, async (path) => {
     const entry = entries.get(path);
     if (!entry) throw new Error(DAMAGED);
     if (await crc32OfBlob(entry.data) !== entry.crc) throw new Error(DAMAGED);
     return entry.data;
-  };
+  });
+}
+
+/** Checks a manifest's format and version; throws if it can't be read. */
+export function checkManifest(manifest: unknown): asserts manifest is Record<string, any> {
+  if (!isRecord(manifest) || manifest.format !== FORMAT) throw new Error(NOT_A_PROJECT);
+  if (typeof manifest.version !== "number" || manifest.version > PROJECT_FILE_VERSION) {
+    throw new Error(
+      "This project was saved by a newer version of OSplit. Update OSplit (reload the page) to open it.",
+    );
+  }
+}
+
+/**
+ * Reads project data from a manifest and its parts. `part` returns the
+ * checked data at a path the manifest names, and throws if it is missing or
+ * damaged.
+ */
+export async function readProjectParts(
+  manifest: unknown,
+  part: (path: string) => Promise<Blob>,
+): Promise<ProjectData> {
+  checkManifest(manifest);
+  /** The data at a path the manifest names, if it names one. */
+  const checked = (path: unknown): Promise<Blob | undefined> =>
+    typeof path === "string" ? part(path) : Promise.resolve(undefined);
 
   const project = readProject(manifest.project);
   const stems: Partial<Record<Stem, Blob>> = {};
@@ -268,6 +304,7 @@ function readProject(value: unknown): Project {
   const project = newProject(name || "Imported project");
   if (typeof value.id === "string" && PROJECT_ID.test(value.id)) project.id = value.id;
   if (isNumber(value.createdAt)) project.createdAt = value.createdAt;
+  if (isNumber(value.updatedAt)) project.updatedAt = value.updatedAt;
   if (typeof value.sourceName === "string") project.sourceName = value.sourceName.slice(0, 255);
   if (["empty", "ready", "processing", "interrupted", "failed"].includes(value.status)) {
     project.status = value.status;

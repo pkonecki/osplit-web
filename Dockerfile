@@ -4,6 +4,12 @@ WORKDIR /app/web
 
 COPY . ./
 
+# Optional cloud sync: the app ids registered with Dropbox and Microsoft
+# (public values, not secrets). Without them the cloud panel is hidden.
+ARG VITE_DROPBOX_APP_KEY=""
+ARG VITE_ONEDRIVE_CLIENT_ID=""
+ARG VITE_ONEDRIVE_TENANT=""
+
 RUN deno install --frozen \
     && PRECOMPRESS=1 deno task build
 
