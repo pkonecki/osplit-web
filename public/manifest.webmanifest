@@ -22,7 +22,7 @@
       "files": [
         {
           "name": "audio",
-          "accept": ["audio/*", ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".webm"]
+          "accept": ["audio/*", ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".webm", "application/x-osplit", ".osplit"]
         }
       ]
     }
@@ -31,7 +31,8 @@
     {
       "action": "./",
       "accept": {
-        "audio/*": [".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".webm"]
+        "audio/*": [".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".webm"],
+        "application/x-osplit": [".osplit"]
       }
     }
   ]

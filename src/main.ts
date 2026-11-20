@@ -1,5 +1,6 @@
 import "./style.css";
 import {
+  downloadBlob,
   exportAll,
   exportChords,
   exportMix,
@@ -44,14 +45,24 @@ import {
   SPEED_STEP,
 } from "./practice";
 import { startMediaSession, updateMediaSession } from "./player/media-session";
-import { onRender, state } from "./state";
+import {
+  asCopy,
+  createProjectFile,
+  isProjectFile,
+  projectFileName,
+  readProjectFile,
+} from "./project-file";
+import { onRender, showMessage, state } from "./state";
 import {
   deleteProject,
   getProject,
   listProjects,
+  readProjectData,
   replaceSource,
   requestPersistentStorage,
   saveProject,
+  storageEstimate,
+  writeProjectData,
 } from "./storage";
 import { heldTaskLocks, taskLockName, withTaskLock } from "./task-lock";
 import {
@@ -92,9 +103,9 @@ import {
   type Track,
 } from "./types";
 import { renderDetail } from "./view/detail";
-import { confirmDialog } from "./view/dialog";
+import { choiceDialog, confirmDialog } from "./view/dialog";
 import { captureForm, restoreForm } from "./view/form-state";
-import { describeError, escapeHtml } from "./view/format";
+import { describeError, escapeHtml, formatBytes } from "./view/format";
 import { installLoopDrag, takeSuppressedClick } from "./view/loop-drag";
 import { updatePlayerDisplay } from "./view/mixer";
 import { updateLoopDisplay, updatePracticeDisplay } from "./view/practice";
@@ -186,7 +197,9 @@ async function importFile(file: File): Promise<void> {
         "Wait for the current task or cancel it before importing another file.",
       );
     }
-    if (state.selectedProject && renderedView?.startsWith("project:")) {
+    if (isProjectFile(file)) {
+      await importProjectFile(file);
+    } else if (state.selectedProject && renderedView?.startsWith("project:")) {
       if (!isAudioFile(file)) throw new Error(NOT_AUDIO_MESSAGE);
       await importSource(file);
     } else {
@@ -195,6 +208,63 @@ async function importFile(file: File): Promise<void> {
   } catch (error) {
     showError(error);
   }
+}
+
+/** Saves a project as a .osplit file, to open on another device. */
+async function exportProjectFile(id: string): Promise<void> {
+  const data = await readProjectData(id);
+  if (!data) throw new Error("That project no longer exists.");
+  showMessage("Preparing the project file…");
+  const file = await createProjectFile(data);
+  downloadBlob(file, projectFileName(data.project));
+  showMessage(
+    `Exported "${data.project.name}" (${formatBytes(file.size)}). Open the file with OSplit on another device to import it.`,
+  );
+}
+
+/** Adds the project in a .osplit file, or replaces the copy already here. */
+async function importProjectFile(file: File): Promise<void> {
+  if (state.working) {
+    throw new Error("Wait for the current task or cancel it before importing a project.");
+  }
+  showMessage("Reading the project file…");
+  let data = await readProjectFile(file);
+  const estimate = await storageEstimate();
+  if (
+    estimate?.quota && estimate.usage !== undefined &&
+    file.size > estimate.quota - estimate.usage
+  ) {
+    throw new Error(
+      `Not enough browser storage to import this project (${formatBytes(file.size)}). Delete projects, then try again.`,
+    );
+  }
+  const existing = await getProject(data.project.id);
+  if (existing) {
+    const choice = await choiceDialog(
+      `"${existing.name}" is already on this device. Replace it with the imported version, or keep both?`,
+      [{ value: "copy", label: "Keep both" }, { value: "replace", label: "Replace" }],
+    );
+    if (!choice) {
+      state.screenMessage = "";
+      await render();
+      return;
+    }
+    if (choice === "copy") {
+      data = asCopy(data);
+    } else if (existing.status === "processing") {
+      throw new Error(
+        "That project is being processed. Wait for it to finish or cancel it, then import again.",
+      );
+    }
+  }
+  // The open project's stems are about to change under the player.
+  if (state.selectedProject?.id === data.project.id) releasePlayers();
+  const project = await writeProjectData(data);
+  forgetAnalysis(project.id);
+  state.selectedProject = project;
+  localStorage.setItem("osplit-web-last-project", project.id);
+  state.screenMessage = `Imported "${project.name}".`;
+  await render();
 }
 
 function registerServiceWorker(): void {
@@ -297,6 +367,14 @@ async function handleClick(event: Event): Promise<void> {
           if (state.selectedProject?.id === id) state.selectedProject = null;
           await render();
         }
+        break;
+      case "export-project": {
+        const projectId = id ?? state.selectedProject?.id;
+        if (projectId) await exportProjectFile(projectId);
+        break;
+      }
+      case "import-project":
+        document.querySelector<HTMLInputElement>("#project-file")?.click();
         break;
       case "import":
         state.fileDialogTarget = "source";
@@ -955,8 +1033,12 @@ root.addEventListener("change", (event) => {
   void handleChange(event).catch(showError);
 });
 root.addEventListener("change", (event) => {
-  if ((event.target as HTMLElement).id === "audio-file") {
-    void handleFileChange(event);
+  const input = event.target as HTMLInputElement;
+  if (input.id === "audio-file") void handleFileChange(event);
+  if (input.id === "project-file") {
+    const file = input.files?.[0];
+    input.value = "";
+    if (file) void importProjectFile(file).catch(showError);
   }
 });
 

@@ -89,11 +89,32 @@ Firefox 153+, or Safari 27+. Downloaded runtime updates are checked against
 the SHA-256 digest published by PyPI.
 
 Projects are scoped to this browser profile and device. Clearing site data
-removes them. OSplit asks the browser to preserve its storage when supported,
+removes them; export the ones to keep as project files first (see below). OSplit asks the browser to preserve its storage when supported,
 but browser quota and eviction policies still apply. Stems are stored as
 lossless FLAC, typically about half the size of WAV. Exports are FLAC by
 default, or WAV when chosen in the mixer, and are saved through the browser's
 download handling.
+
+## Moving projects between devices
+
+**Export project file** (on a project page, or *Export* in the project list)
+saves a project as one `.osplit` file: its source audio (when kept), stems,
+waveforms, tempo and chord analysis with your corrections, and its mixer and
+practice settings. Models are not included; the other device downloads them
+only if it separates again. A file is about the size of the stems plus the
+source, roughly 100 MB for a 4-minute song.
+
+Move the file any way you like (AirDrop, a USB drive, a synced cloud folder,
+email for short tracks), then open it with **Import project file** on the
+project list, by dropping it on the app, or with "Open with OSplit" where the
+installed app handles `.osplit` files. Importing a project that is already on
+the device asks whether to replace it or keep both. Files are checked when
+imported: a damaged file is refused, and an export made mid-separation comes
+back as interrupted. The files also work as backups.
+
+The file is a ZIP archive (uncompressed) with an `osplit.json` manifest; see
+`src/project-file.ts` for the layout. Files from a newer version of OSplit ask
+for an update rather than importing partly.
 
 ## Practice tools
 

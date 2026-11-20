@@ -5,6 +5,7 @@ import {
   openApp,
   readStore,
   SEPARATION_TIMEOUT,
+  separateClip,
   writeTestClip,
 } from "./helpers";
 
@@ -182,4 +183,62 @@ test("declares install icons that exist at their sizes", async ({ page }) => {
   });
   expect(icons.map((icon) => icon.purpose).sort()).toEqual(["any", "any", "apple", "maskable"]);
   for (const icon of icons) expect(icon.actual).toBe(icon.declared);
+});
+
+test("moves a project to another device in a project file", async ({ page, browser }, testInfo) => {
+  await openApp(page);
+  await separateClip(page, "Travelling song", clip);
+  await page.click('[data-action="speed-step"][data-step="-1"]');
+  // The analysis runs after separation; wait for it, so it travels too.
+  await expect.poll(async () => (await readStore(page, "analysis")).length, {
+    timeout: 60_000,
+  }).toBe(1);
+
+  const download = page.waitForEvent("download");
+  await page.click('.project-heading [data-action="export-project"]');
+  const file = await download;
+  expect(file.suggestedFilename()).toBe("Travelling song.osplit");
+  const path = testInfo.outputPath("Travelling song.osplit");
+  await file.saveAs(path);
+  await expect(page.locator(".message span")).toContainText("Exported");
+
+  // "Another device": a fresh browser profile, with no models downloaded.
+  const other = await browser.newContext({ baseURL: testInfo.project.use.baseURL });
+  await other.addInitScript(instrument);
+  const device = await other.newPage();
+  await openApp(device);
+  const chooser = device.waitForEvent("filechooser");
+  await device.click('[data-action="import-project"]');
+  await (await chooser).setFiles(path);
+  await expect(device.locator("h1")).toHaveText("Travelling song");
+  await expect(device.locator(".message span")).toContainText('Imported "Travelling song"');
+  expect(await readStore(device, "stems")).toHaveLength(5);
+  expect(await readStore(device, "sources")).toHaveLength(1);
+  expect(await readStore(device, "analysis")).toHaveLength(1);
+  expect(await readStore(device, "models")).toHaveLength(0);
+  const [project] = await readStore<{ speed?: number; status: string }>(device, "projects");
+  expect(project).toMatchObject({ speed: 0.95, status: "ready" });
+  await device.click('[data-action="play"]');
+  await expect(device.locator('[data-action="play"]')).toHaveAttribute("aria-label", "Pause");
+  await device.click('[data-action="play"]');
+
+  // Importing it again asks what to do: keep both adds a copy.
+  const again = device.waitForEvent("filechooser");
+  await device.click('[data-action="home"] >> nth=1');
+  await device.click('[data-action="import-project"]');
+  await (await again).setFiles(path);
+  const dialog = device.locator("dialog.confirm-dialog");
+  await expect(dialog).toContainText("already on this device");
+  await dialog.getByRole("button", { name: "Keep both" }).click();
+  await expect(device.locator("h1")).toHaveText("Travelling song (copy)");
+  expect(await readStore(device, "projects")).toHaveLength(2);
+  expect(await readStore(device, "stems")).toHaveLength(10);
+
+  // Anything else is refused with a message.
+  await device.click('[data-action="home"] >> nth=1');
+  const wrong = device.waitForEvent("filechooser");
+  await device.click('[data-action="import-project"]');
+  await (await wrong).setFiles(clip);
+  await expect(device.locator(".message span")).toContainText("isn't an OSplit project");
+  await other.close();
 });

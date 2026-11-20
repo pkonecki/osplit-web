@@ -38,6 +38,10 @@ export async function renderProjects(): Promise<string> {
           <input id="new-project-name" maxlength="80" placeholder="Project name (optional)" />
           <button class="button primary" data-action="create">Create project</button>
         </div>
+        <div class="import-row">
+          <span class="muted">Moving a project from another device? Export it there as a project file.</span>
+          <button class="button subtle" data-action="import-project">Import project file</button>
+        </div>
       </section>
       <div class="section-heading"><h2>Saved projects</h2><span class="muted">${state.projects.length}</span></div>
       ${
@@ -68,6 +72,9 @@ function projectCard(project: Project): string {
   }</small>
         </span>
       </button>
+      <button class="button text-button" data-action="export-project" data-id="${
+    escapeHtml(project.id)
+  }" aria-label="Export ${escapeHtml(project.name)} as a project file">Export</button>
       <button class="button danger-quiet" data-action="delete" data-id="${
     escapeHtml(project.id)
   }">Delete</button>
