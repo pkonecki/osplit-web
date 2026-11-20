@@ -13,7 +13,7 @@ import {
 import { formatTime } from "./format";
 import { chordLaneMarkup, chordNowMarkup } from "./harmony";
 import { loopRulerMarkup, practiceMarkup } from "./practice";
-import { updatePlayheads, waveformMarkup } from "./waveforms";
+import { overviewMarkup, updatePlayheads, waveformMarkup } from "./waveforms";
 
 export function renderMixer(project: Project): string {
   const time = playerTime();
@@ -51,6 +51,7 @@ export function renderMixer(project: Project): string {
       </div>
       ${practiceMarkup(project)}
       ${chordNowMarkup()}
+      ${overviewMarkup()}
       ${loopRulerMarkup()}
       ${chordLaneMarkup()}
       <div class="stem-list">

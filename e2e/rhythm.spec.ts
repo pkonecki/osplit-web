@@ -111,7 +111,7 @@ test("finds the tempo, plays the click and loops bars", async ({ page }) => {
   loop = (await project(page)).loop!;
   expect(loop.end - loop.start).toBeLessThan(4.2);
 
-  // Dragging a loop across the ruler snaps its edges to beats; Shift doesn't.
+  // A dragged loop edge snaps to beats; Shift doesn't.
   const beats = Array.from(stored.beats);
   const nearestBeat = (time: number) =>
     beats.reduce((best, beat) => Math.abs(beat - time) < Math.abs(best - time) ? beat : best);
@@ -119,22 +119,25 @@ test("finds the tempo, plays the click and loops bars", async ({ page }) => {
   await ruler.scrollIntoViewIfNeeded();
   const box = (await ruler.boundingBox())!;
   const y = box.y + box.height / 2;
-  const drag = async (from: number, to: number) => {
-    await page.mouse.move(box.x + box.width * from, y);
+  const dragEnd = async (to: number) => {
+    const handle = (await page.locator('[data-loop-handle="end"]').boundingBox())!;
+    const from = handle.x + handle.width / 2;
+    await page.mouse.move(from, y);
     await page.mouse.down();
-    await page.mouse.move(box.x + box.width * (from + to) / 2, y, { steps: 4 });
+    await page.mouse.move((from + box.x + box.width * to) / 2, y, { steps: 4 });
     await page.mouse.move(box.x + box.width * to, y, { steps: 4 });
     await page.mouse.up();
   };
-  await drag(0.33, 0.61);
-  await expect.poll(async () => (await project(page)).loop?.start)
-    .toBeCloseTo(nearestBeat(3.3), 2);
-  expect((await project(page)).loop?.end).toBeCloseTo(nearestBeat(6.1), 2);
+  // The clip is 10 s; the loop is about 4–8 s. 6.25 s is between beats.
+  const target = 6.25;
+  await dragEnd(0.625);
+  await expect.poll(async () => (await project(page)).loop?.end)
+    .toBeCloseTo(nearestBeat(target), 2);
   await page.keyboard.down("Shift");
-  await drag(0.33, 0.61);
+  await dragEnd(0.625);
   await page.keyboard.up("Shift");
-  await expect.poll(async () => (await project(page)).loop?.start).toBeCloseTo(3.3, 1);
-  expect(Math.abs((await project(page)).loop!.start - nearestBeat(3.3))).toBeGreaterThan(0.1);
+  await expect.poll(async () => (await project(page)).loop?.end).toBeCloseTo(target, 1);
+  expect(Math.abs((await project(page)).loop!.end - nearestBeat(target))).toBeGreaterThan(0.1);
 
   // Corrections: ×2, ÷2, beats per bar; saved with the analysis.
   await page.click("#tempo-chip");

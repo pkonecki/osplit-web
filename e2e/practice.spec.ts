@@ -150,37 +150,112 @@ test("speed, key and loop with decoded playback", async ({ page }) => {
   await expect(page.locator("#loop-value")).toHaveText("0:01.0–0:03.1");
   await expect(page.locator('[data-loop-handle="end"]')).toHaveAttribute("aria-valuetext", "0:03.1");
 
-  // Dragging across the ruler draws a new loop and doesn't seek.
+  // Dragging on the ruler at full zoom draws no loop and doesn't seek.
   const ruler = page.locator(".loop-ruler");
   await ruler.scrollIntoViewIfNeeded();
   const box = (await ruler.boundingBox())!;
   const y = box.y + box.height / 2;
-  await page.mouse.move(box.x + box.width * 0.5, y);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width * 0.6, y, { steps: 4 });
-  await page.mouse.move(box.x + box.width * (5 / 6), y, { steps: 4 });
-  await page.mouse.up();
-  await expect.poll(async () => (await saved(page)).loop?.start).toBeCloseTo(3, 1);
-  expect((await saved(page)).loop?.end).toBeCloseTo(5, 1);
-  expect((await saved(page)).loop?.enabled).toBe(true);
-  // The playhead was before the loop (0.5 s) and stays there.
+  const drag = async (fromX: number, toX: number, atY = y) => {
+    await page.mouse.move(fromX, atY);
+    await page.mouse.down();
+    await page.mouse.move((fromX + toX) / 2, atY, { steps: 4 });
+    await page.mouse.move(toX, atY, { steps: 4 });
+    await page.mouse.up();
+  };
+  const at = (seconds: number) => box.x + box.width * (seconds / 6);
+  const writes = await page.evaluate(() => window.__projectWrites);
+  await drag(at(4.2), at(5.4));
+  await page.waitForTimeout(200);
+  expect(await page.evaluate(() => window.__projectWrites)).toBe(writes);
   expect(await position(page)).toBe(0.5);
 
-  // Dragging a handle moves that edge.
-  const handle = (await page.locator('[data-loop-handle="start"]').boundingBox())!;
-  await page.mouse.move(handle.x + handle.width / 2, y);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width * (2 / 6), y, { steps: 5 });
-  await page.mouse.up();
+  // Dragging a loop edge moves it (snapping needs a beat grid: none here).
+  await drag(at(3.1), at(5));
+  await expect.poll(async () => (await saved(page)).loop?.end).toBeCloseTo(5, 1);
+  expect((await saved(page)).loop?.start).toBeCloseTo(1, 1);
+  await drag(at(1), at(2));
   await expect.poll(async () => (await saved(page)).loop?.start).toBeCloseTo(2, 1);
   expect((await saved(page)).loop?.end).toBeCloseTo(5, 1);
-
-  // A click on a waveform still seeks.
+  // The edges can be dragged on the waveforms too.
   const wave = page.locator('[data-waveform="drums"]');
   await wave.scrollIntoViewIfNeeded();
   const waveBox = (await wave.boundingBox())!;
+  const onWave = (seconds: number) => waveBox.x + waveBox.width * (seconds / 6);
+  await drag(onWave(5), onWave(4), waveBox.y + waveBox.height / 2);
+  await expect.poll(async () => (await saved(page)).loop?.end).toBeCloseTo(4, 1);
+  expect(await position(page)).toBe(0.5);
+
+  // A click on a waveform still seeks.
   await page.mouse.click(waveBox.x + waveBox.width * 0.25, waveBox.y + waveBox.height / 2);
   await expect.poll(() => position(page)).toBeCloseTo(1.5, 1);
+
+  // On the ruler, dragging inside the loop moves it, keeping its length;
+  // a click inside it still seeks.
+  await ruler.scrollIntoViewIfNeeded();
+  const rulerBox = (await ruler.boundingBox())!;
+  const onRuler = (seconds: number) => rulerBox.x + rulerBox.width * (seconds / 6);
+  const rulerMid = rulerBox.y + rulerBox.height / 2;
+  await drag(onRuler(3), onRuler(3.5), rulerMid);
+  await expect.poll(async () => (await saved(page)).loop?.start).toBeCloseTo(2.5, 1);
+  expect((await saved(page)).loop?.end).toBeCloseTo(4.5, 1);
+  expect(await position(page)).toBeCloseTo(1.5, 1);
+  await drag(onRuler(3.5), onRuler(3), rulerMid);
+  await expect.poll(async () => (await saved(page)).loop?.start).toBeCloseTo(2, 1);
+  expect((await saved(page)).loop?.end).toBeCloseTo(4, 1);
+  await page.mouse.click(onRuler(3), rulerMid);
+  await expect.poll(() => position(page)).toBeCloseTo(3, 1);
+  // So does a click on a loop edge, which leaves the loop as it was.
+  await page.mouse.click(onRuler(2), rulerMid);
+  await expect.poll(() => position(page)).toBeCloseTo(2, 1);
+  expect((await saved(page)).loop).toMatchObject({ start: 2, end: 4 });
+  await seekTo(page, 1.5);
+
+  // Zoom: the overview marks the part in view.
+  const viewBox = page.locator(".overview-window");
+  const windowShare = () =>
+    viewBox.evaluate((element: HTMLElement) => ({
+      left: parseFloat(element.style.left),
+      width: parseFloat(element.style.width),
+    }));
+  expect((await windowShare()).width).toBeCloseTo(100, 0);
+  await page.click('[data-action="zoom"][data-zoom="in"]');
+  expect(await windowShare()).toEqual({ left: 25, width: 50 });
+  // Dragging on the ruler outside the loop moves along (a quarter of the
+  // ruler: 0.75 s). The view is 1.5–4.5 s and the loop 2–4 s.
+  await ruler.scrollIntoViewIfNeeded();
+  const rulerNow = (await ruler.boundingBox())!;
+  const rulerY = rulerNow.y + rulerNow.height / 2;
+  await drag(rulerNow.x + rulerNow.width * 0.95, rulerNow.x + rulerNow.width * 0.7, rulerY);
+  await expect.poll(async () => (await windowShare()).left).toBeCloseTo(37.5, 0);
+  expect((await windowShare()).width).toBeCloseTo(50, 0);
+  expect((await saved(page)).loop).toMatchObject({ start: 2, end: 4 });
+  expect(await position(page)).toBeCloseTo(1.5, 1);
+  // Dragging the overview window moves it too.
+  const overview = page.locator(".overview");
+  await overview.scrollIntoViewIfNeeded();
+  const overviewBox = (await overview.boundingBox())!;
+  const oy = overviewBox.y + overviewBox.height / 2;
+  await drag(overviewBox.x + overviewBox.width * 0.6, overviewBox.x + overviewBox.width * 0.4, oy);
+  await expect.poll(async () => (await windowShare()).left).toBeCloseTo(17.5, 0);
+  // A plain wheel zooms on the overview, not on the waveforms.
+  await wave.scrollIntoViewIfNeeded();
+  const waveNow = (await wave.boundingBox())!;
+  await page.mouse.move(waveNow.x + waveNow.width / 2, waveNow.y + waveNow.height / 2);
+  await page.mouse.wheel(0, -200);
+  await page.waitForTimeout(100);
+  expect((await windowShare()).width).toBeCloseTo(50, 0);
+  await overview.scrollIntoViewIfNeeded();
+  const overviewNow = (await overview.boundingBox())!;
+  await page.mouse.move(overviewNow.x + overviewNow.width * 0.4, overviewNow.y + overviewNow.height / 2);
+  await page.mouse.wheel(0, -200);
+  await expect.poll(async () => (await windowShare()).width).toBeLessThan(40);
+  // Zoom to the loop, then back to the whole track.
+  await page.click('[data-action="zoom"][data-zoom="loop"]');
+  // 2–4 s with a 10% margin each side: 1.8–4.2 s of 6 s.
+  await expect.poll(async () => (await windowShare()).left).toBeCloseTo(30, 0);
+  expect((await windowShare()).width).toBeCloseTo(40, 0);
+  await page.click('[data-action="zoom"][data-zoom="fit"]');
+  expect(await windowShare()).toEqual({ left: 0, width: 100 });
 
   // Everything survives a reload.
   await press(page, "-", 4);
@@ -206,6 +281,14 @@ test("speed, key and loop with decoded playback", async ({ page }) => {
   expect(reset.speed).toBe(1);
   expect(reset.semitones).toBe(0);
   expect(reset.loop).toBeUndefined();
+
+  // Without a loop, the Loop button makes one: 4 s from the playhead (no
+  // beat grid here), turned on.
+  await seekTo(page, 1);
+  await page.click('[data-action="loop-toggle"]');
+  await expect(page.locator('[data-action="loop-toggle"]')).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(async () => (await saved(page)).loop).toEqual({ start: 1, end: 5, enabled: true });
+  await expect(page.locator('[data-loop-handle="start"]')).toBeVisible();
 });
 
 test("speed and loop with streaming playback", async ({ page, context }) => {

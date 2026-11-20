@@ -15,6 +15,7 @@ import { projectGrid } from "../tasks/analysis";
 import type { Project } from "../types";
 import { keyChipMarkup, keyPanelMarkup, updateHarmonyDisplay } from "./harmony";
 import { tempoChipMarkup, tempoPanelMarkup, updateTempoDisplay } from "./tempo";
+import { lanePercent } from "./timeline";
 
 /**
  * The practice bar (speed, key, loop) and the loop ruler above the stems.
@@ -62,7 +63,7 @@ export function practiceMarkup(project: Project): string {
         <button class="step-button" data-action="loop-set" data-edge="end" aria-label="Set loop end at the playhead (])">B</button>
         <button class="loop-toggle${loop?.enabled ? " on" : ""}" data-action="loop-toggle" aria-pressed="${
     loop?.enabled ?? false
-  }" ${loop ? "" : "disabled"}>Loop</button>
+  }" title="${loop ? "Turn the loop on or off (L)" : "Loop 4 bars from the playhead (L)"}">Loop</button>
         <output id="loop-value" class="practice-value">${loopText(project)}</output>
         <button class="step-button" data-action="loop-clear" aria-label="Clear loop" ${
     loop ? "" : "hidden"
@@ -88,10 +89,13 @@ export function practiceMarkup(project: Project): string {
   `;
 }
 
-/** The strip above the stems where a loop is drawn, dragged and adjusted. */
+/**
+ * The bar ruler above the stems, with the loop: drag its edges to move them,
+ * drag elsewhere to move along the track.
+ */
 export function loopRulerMarkup(): string {
   return `
-    <div class="loop-ruler" data-action="waveform-seek" title="Drag to set a loop">
+    <div class="loop-ruler" data-action="waveform-seek">
       <canvas class="grid-canvas"></canvas>
       <span class="loop-band" hidden></span>
       <span class="playhead"></span>
@@ -119,7 +123,7 @@ export function updatePracticeDisplay(project: Project): void {
   setDisabled('[data-action="key-step"][data-step="1"]', semitones >= MAX_SEMITONES);
   const toggle = document.querySelector<HTMLButtonElement>('[data-action="loop-toggle"]');
   if (toggle) {
-    toggle.disabled = !project.loop;
+    toggle.title = project.loop ? "Turn the loop on or off (L)" : "Loop 4 bars from the playhead (L)";
     toggle.classList.toggle("on", project.loop?.enabled ?? false);
     toggle.setAttribute("aria-pressed", String(project.loop?.enabled ?? false));
   }
@@ -136,29 +140,37 @@ export function updatePracticeDisplay(project: Project): void {
   updateLoopDisplay(project);
 }
 
-/** Positions the loop band and handles (also after the player loads). */
+/**
+ * Positions the loop band and handles (also after the player loads or the
+ * view changes). The handles show only while the loop is on; a loop turned
+ * off stays as a faint band.
+ */
 export function updateLoopDisplay(project: Project | null): void {
   const { duration } = playerTime();
   const loop = project?.loop;
   const show = Boolean(loop && duration > 0);
-  const left = show ? (loop!.start / duration) * 100 : 0;
-  const right = show ? (loop!.end / duration) * 100 : 0;
   for (const band of document.querySelectorAll<HTMLElement>(".loop-band")) {
     band.hidden = !show;
     band.classList.toggle("off", !loop?.enabled);
+    if (!show) continue;
+    const whole = band.closest(".overview") !== null;
+    const percent = (time: number) => whole ? (time / duration) * 100 : lanePercent(time, duration);
+    const left = percent(loop!.start);
     band.style.left = `${left}%`;
-    band.style.width = `${right - left}%`;
+    band.style.width = `${percent(loop!.end) - left}%`;
   }
   for (const handle of document.querySelectorAll<HTMLElement>("[data-loop-handle]")) {
-    handle.hidden = !show;
-    if (!show) continue;
+    handle.hidden = !show || !loop!.enabled;
+    if (handle.hidden) continue;
     const edge = handle.dataset.loopHandle === "start" ? loop!.start : loop!.end;
-    handle.style.left = `${(edge / duration) * 100}%`;
+    handle.style.left = `${lanePercent(edge, duration)}%`;
     handle.setAttribute("aria-valuemin", "0");
     handle.setAttribute("aria-valuemax", String(duration));
     handle.setAttribute("aria-valuenow", String(edge));
     handle.setAttribute("aria-valuetext", formatPrecise(edge));
   }
+  const zoomLoop = document.querySelector<HTMLButtonElement>('[data-action="zoom"][data-zoom="loop"]');
+  if (zoomLoop) zoomLoop.disabled = !show;
 }
 
 function loopText(project: Project): string {

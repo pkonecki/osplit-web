@@ -39,6 +39,7 @@ import {
   clampSpeed,
   loopWithEnd,
   loopWithStart,
+  normalizeLoop,
   nudgeLoopEdge,
   projectSemitones,
   projectSpeed,
@@ -97,7 +98,6 @@ import { renderDetail } from "./view/detail";
 import { confirmDialog } from "./view/dialog";
 import { captureForm, restoreForm } from "./view/form-state";
 import { describeError, escapeHtml } from "./view/format";
-import { installLoopDrag, takeSuppressedClick } from "./view/loop-drag";
 import { updatePlayerDisplay } from "./view/mixer";
 import { updateLoopDisplay, updatePracticeDisplay } from "./view/practice";
 import { renderProjects } from "./view/projects";
@@ -112,11 +112,21 @@ import {
   setAnnounceChords,
   setKeyPanelOpen,
   songKey,
+  positionChordLane,
   updateChordNow,
   updateHarmonyDisplay,
 } from "./view/harmony";
 import { keyName } from "./analysis/spelling";
-import { setGridOverlay, showWaveforms, waveformSeekTime } from "./view/waveforms";
+import {
+  drawAll as drawTimeline,
+  followPlayheads,
+  setGridOverlay,
+  showWaveforms,
+  waveformSeekTime,
+} from "./view/waveforms";
+import { installTimelineInput, takeSuppressedClick } from "./view/timeline-input";
+import { onTimelineChange, setTimelineView, timelineView } from "./view/timeline";
+import { fullView, viewAround, viewTime, zoomView } from "./timeline";
 
 const root = document.querySelector<HTMLDivElement>("#app");
 if (!root) throw new Error("The app root element is missing.");
@@ -127,6 +137,13 @@ setPlayerTick(() => {
   updateMediaSession(playerTime());
   if (state.selectedProject) updateChordNow(state.selectedProject);
   followChords();
+  followPlayheads();
+});
+onTimelineChange(() => {
+  drawTimeline();
+  updateLoopDisplay(state.selectedProject);
+  if (state.selectedProject) updateHarmonyDisplay(state.selectedProject);
+  else positionChordLane();
 });
 setPlayerLoaded((project) => {
   void showWaveforms(project).catch(console.warn);
@@ -381,7 +398,6 @@ async function handleClick(event: Event): Promise<void> {
       case "waveform-seek":
         // The end of a loop drag, or a press on a loop handle, doesn't seek.
         if (takeSuppressedClick()) break;
-        if ((event.target as HTMLElement).closest("[data-loop-handle]")) break;
         seekTo(waveformSeekTime(button, (event as MouseEvent).clientX));
         break;
       case "speed-step":
@@ -411,6 +427,9 @@ async function handleClick(event: Event): Promise<void> {
             button.dataset.edge === "start" ? "start" : "end",
           );
         }
+        break;
+      case "zoom":
+        zoomTimeline(button.dataset.zoom);
         break;
       case "loop-toggle":
         if (state.selectedProject) await toggleLoop(state.selectedProject);
@@ -459,6 +478,8 @@ async function handleClick(event: Event): Promise<void> {
         }
         break;
       case "chord-seek":
+        // The end of a drag along the lane doesn't seek.
+        if (takeSuppressedClick()) break;
         if (state.selectedProject) {
           const chord = chordForBox(state.selectedProject, button);
           if (chord) seekTo(chord.start);
@@ -567,8 +588,37 @@ function setLoopEdge(project: Project, edge: "start" | "end"): Promise<void> {
   return savePractice({ ...project, loop });
 }
 
+/** Zoom buttons: in, out, the whole track, or the loop. */
+function zoomTimeline(kind: string | undefined): void {
+  const { duration } = playerTime();
+  const view = timelineView(duration);
+  const loop = state.selectedProject?.loop;
+  if (kind === "in" || kind === "out") {
+    setTimelineView(zoomView(view, kind === "in" ? 2 : 0.5, viewTime(view, 0.5), duration));
+  } else if (kind === "loop" && loop) {
+    setTimelineView(viewAround(loop.start, loop.end, duration));
+  } else {
+    setTimelineView(fullView(duration));
+  }
+}
+
+/** Seconds looped by the Loop button when there is no beat grid. */
+const DEFAULT_LOOP_SECONDS = 4;
+
+/**
+ * The Loop button and L: turns the loop on or off, or makes one when there
+ * is none (4 bars from the playhead, or 4 s without a beat grid).
+ */
 function toggleLoop(project: Project): Promise<void> {
-  if (!project.loop) return Promise.resolve();
+  if (!project.loop) {
+    const { position, duration } = playerTime();
+    if (!duration) return Promise.resolve();
+    const grid = projectGrid(project.id);
+    const region = (grid ? barLoop(grid, position, 4, duration) : null) ??
+      normalizeLoop(position, position + DEFAULT_LOOP_SECONDS, duration);
+    if (!region) return Promise.resolve();
+    return savePractice({ ...project, loop: { ...region, enabled: true } });
+  }
   return savePractice({
     ...project,
     loop: { ...project.loop, enabled: !project.loop.enabled },
@@ -957,9 +1007,8 @@ window.addEventListener("resize", () => {
     if (state.selectedProject) updateHarmonyDisplay(state.selectedProject);
   });
 });
-installLoopDrag(root, {
+installTimelineInput(root, {
   loop: () => state.selectedProject?.loop,
-  duration: () => playerTime().duration,
   preview: (loop) => {
     if (!state.selectedProject) return;
     void savePractice({ ...state.selectedProject, loop }, false).catch(showError);
