@@ -122,10 +122,14 @@ async function tokenRequest(
   });
   const result = await response.json().catch(() => ({})) as Record<string, any>;
   if (!response.ok || typeof result.access_token !== "string") {
-    if (result.error === "invalid_grant" || response.status === 400 || response.status === 401) {
+    // The provider's own explanation, e.g. Microsoft's "AADSTS…" message.
+    const detail = typeof result.error_description === "string"
+      ? result.error_description.split(/\r?\n/)[0].slice(0, 300)
+      : typeof result.error === "string" ? result.error : "";
+    if (body.grant_type === "refresh_token" && (response.status === 400 || response.status === 401)) {
       throw new ReconnectNeeded();
     }
-    throw new Error(`Sign-in failed (${response.status}). Try again later.`);
+    throw new Error(`Sign-in failed (${response.status}${detail ? `: ${detail}` : ""}).`);
   }
   const expiresIn = typeof result.expires_in === "number" ? result.expires_in : 3600;
   return {

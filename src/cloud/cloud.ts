@@ -178,8 +178,9 @@ export async function finishSignIn(): Promise<string | null> {
   let tokens: Tokens;
   try {
     tokens = await exchangeCode(config, params.get("code") ?? "", pending.verifier, redirectUri());
-  } catch {
-    return `Couldn't connect to ${label}. Try again.`;
+  } catch (error) {
+    const detail = error instanceof Error ? ` ${error.message}` : "";
+    return `Couldn't connect to ${label}.${detail}`;
   }
   const previous = loadConnection();
   saveConnection({

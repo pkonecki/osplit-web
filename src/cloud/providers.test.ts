@@ -117,6 +117,17 @@ describe("OAuth sign-in", () => {
       redirect_uri: "https://example.com/",
     });
   });
+
+  it("reports the provider's reason when the code is refused", async () => {
+    const { fn } = fakeFetch(() =>
+      json({
+        error: "invalid_client",
+        error_description: "AADSTS7000218: The request body must contain client_secret.\r\nTrace ID: x",
+      }, 401)
+    );
+    await expect(exchangeCode(oneDriveConfig("c"), "code", "v", "https://example.com/", fn))
+      .rejects.toThrow("Sign-in failed (401: AADSTS7000218: The request body must contain client_secret.).");
+  });
 });
 
 describe("authorized requests", () => {
