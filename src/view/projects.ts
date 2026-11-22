@@ -2,6 +2,8 @@ import { appUrl } from "../paths";
 import { state } from "../state";
 import { storageEstimate } from "../storage";
 import type { Project } from "../types";
+import { connection } from "../cloud/cloud";
+import { cloudNote, cloudPanelMarkup } from "./cloud";
 import { fileInputMarkup, messageMarkup } from "./detail";
 import { escapeHtml, formatBytes, statusLabel } from "./format";
 
@@ -11,6 +13,7 @@ export async function renderProjects(): Promise<string> {
   const total = estimate?.quota
     ? formatBytes(estimate.quota)
     : "browser managed";
+  const cloud = connection();
   const updateLabel = state.working
     ? "Checking / updating yt-dlp…"
     : "Check yt-dlp update";
@@ -28,7 +31,9 @@ export async function renderProjects(): Promise<string> {
       <section class="intro">
         <p class="eyebrow">LOCAL STEM STUDIO</p>
         <h1>Your projects</h1>
-        <p class="muted">Separate audio into vocals, piano, drums, bass, and other. Your audio and projects stay in this browser.</p>
+        <p class="muted">Separate audio into vocals, piano, drums, bass, and other. ${
+    cloud ? `Your projects stay in this browser and sync to your ${escapeHtml(cloud.label)}.` : "Your audio and projects stay in this browser."
+  }</p>
         <div class="storage-note">Browser storage: ${used} used · ${total} available. Models are downloaded only when first needed.</div>
       </section>
       ${state.screenMessage ? messageMarkup(state.screenMessage) : ""}
@@ -38,7 +43,12 @@ export async function renderProjects(): Promise<string> {
           <input id="new-project-name" maxlength="80" placeholder="Project name (optional)" />
           <button class="button primary" data-action="create">Create project</button>
         </div>
+        <div class="import-row">
+          <span class="muted">Moving a project from another device? Export it there as a project file.</span>
+          <button class="button subtle" data-action="import-project">Import project file</button>
+        </div>
       </section>
+      ${await cloudPanelMarkup()}
       <div class="section-heading"><h2>Saved projects</h2><span class="muted">${state.projects.length}</span></div>
       ${
     state.projects.length
@@ -65,9 +75,12 @@ function projectCard(project: Project): string {
           <strong>${escapeHtml(project.name)}</strong>
           <small>${escapeHtml(project.sourceName ?? "No audio source")} · ${
     escapeHtml(statusLabel(project.status))
-  }</small>
+  }${escapeHtml(cloudNote(project))}</small>
         </span>
       </button>
+      <button class="button text-button" data-action="export-project" data-id="${
+    escapeHtml(project.id)
+  }" aria-label="Export ${escapeHtml(project.name)} as a project file">Export</button>
       <button class="button danger-quiet" data-action="delete" data-id="${
     escapeHtml(project.id)
   }">Delete</button>

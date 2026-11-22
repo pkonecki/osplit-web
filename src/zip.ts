@@ -124,3 +124,89 @@ export async function createZip(
 
   return new Blob([...parts, ...central, end], { type: "application/zip" });
 }
+
+/** A file read from a ZIP archive: its data is a slice of the archive. */
+export interface ZipFile extends ZipEntry {
+  /** CRC-32 recorded in the archive, to check the data against. */
+  crc: number;
+}
+
+const EOCD_SIGNATURE = 0x06054b50;
+const CENTRAL_SIGNATURE = 0x02014b50;
+const LOCAL_SIGNATURE = 0x04034b50;
+const EOCD_SIZE = 22;
+const MAX_COMMENT = 0xffff;
+
+async function bytesAt(blob: Blob, start: number, length: number): Promise<DataView> {
+  if (start < 0 || start + length > blob.size) throw new Error("truncated");
+  return new DataView(await blob.slice(start, start + length).arrayBuffer());
+}
+
+/**
+ * Lists the files of a ZIP archive whose files are stored uncompressed, as
+ * `createZip` writes them. Nothing is read into memory but the headers: each
+ * file's data is a slice of `archive`. Throws for archives that are damaged,
+ * compressed, encrypted or ZIP64.
+ */
+export async function readZip(archive: Blob): Promise<ZipFile[]> {
+  try {
+    return await readZipEntries(archive);
+  } catch (error) {
+    if (error instanceof Error && error.message !== "truncated") throw error;
+    throw new Error("The file is damaged or is not a ZIP archive.");
+  }
+}
+
+async function readZipEntries(archive: Blob): Promise<ZipFile[]> {
+  // The end record is the last thing in the file, before an optional comment.
+  const tailStart = Math.max(0, archive.size - EOCD_SIZE - MAX_COMMENT);
+  const tail = await bytesAt(archive, tailStart, archive.size - tailStart);
+  let end = -1;
+  for (let i = tail.byteLength - EOCD_SIZE; i >= 0; i--) {
+    if (tail.getUint32(i, true) === EOCD_SIGNATURE) {
+      end = i;
+      break;
+    }
+  }
+  if (end < 0) throw new Error("truncated");
+  const count = tail.getUint16(end + 10, true);
+  const centralSize = tail.getUint32(end + 12, true);
+  const centralOffset = tail.getUint32(end + 16, true);
+  if (count === 0xffff || centralOffset === MAX_SIZE) {
+    throw new Error("ZIP64 archives are not supported.");
+  }
+  const central = await bytesAt(archive, centralOffset, centralSize);
+  const decoder = new TextDecoder();
+  const files: ZipFile[] = [];
+  let at = 0;
+  for (let index = 0; index < count; index++) {
+    if (at + 46 > central.byteLength || central.getUint32(at, true) !== CENTRAL_SIGNATURE) {
+      throw new Error("truncated");
+    }
+    const flags = central.getUint16(at + 8, true);
+    const method = central.getUint16(at + 10, true);
+    const crc = central.getUint32(at + 16, true);
+    const compressedSize = central.getUint32(at + 20, true);
+    const size = central.getUint32(at + 24, true);
+    const nameLength = central.getUint16(at + 28, true);
+    const extraLength = central.getUint16(at + 30, true);
+    const commentLength = central.getUint16(at + 32, true);
+    const localOffset = central.getUint32(at + 42, true);
+    if (at + 46 + nameLength > central.byteLength) throw new Error("truncated");
+    const name = decoder.decode(
+      new Uint8Array(central.buffer, central.byteOffset + at + 46, nameLength),
+    );
+    if (flags & 0x1) throw new Error("Encrypted ZIP archives are not supported.");
+    if (method !== 0 || compressedSize !== size) {
+      throw new Error("Compressed ZIP archives are not supported.");
+    }
+    const local = await bytesAt(archive, localOffset, 30);
+    if (local.getUint32(0, true) !== LOCAL_SIGNATURE) throw new Error("truncated");
+    const start = localOffset + 30 + local.getUint16(26, true) +
+      local.getUint16(28, true);
+    if (start + size > archive.size) throw new Error("truncated");
+    files.push({ name, data: archive.slice(start, start + size), crc });
+    at += 46 + nameLength + extraLength + commentLength;
+  }
+  return files;
+}

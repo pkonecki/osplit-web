@@ -239,6 +239,10 @@ jobs:
         env:
           # "/<repository>" for a project site, empty with a custom domain.
           BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          # Optional cloud sync, from the repository's Actions variables:
+          # the app ids registered with Dropbox and Microsoft (not secrets).
+          VITE_DROPBOX_APP_KEY: ${{ vars.DROPBOX_APP_KEY }}
+          VITE_ONEDRIVE_CLIENT_ID: ${{ vars.ONEDRIVE_CLIENT_ID }}
 
       - uses: actions/upload-pages-artifact@v5
         with:

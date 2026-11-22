@@ -1,10 +1,10 @@
 /// <reference types="node" />
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { crc32, crc32OfBlob, createZip, dosDateTime } from "./zip";
+import { crc32, crc32OfBlob, createZip, dosDateTime, readZip } from "./zip";
 
 const workDir = mkdtempSync(join(tmpdir(), "osplit-zip-"));
 afterAll(() => rmSync(workDir, { recursive: true, force: true }));
@@ -68,5 +68,54 @@ describe("ZIP writer", () => {
         22,
       ),
     );
+  });
+});
+
+describe("ZIP reader", () => {
+  it("reads back what the writer wrote, with names, data and CRCs", async () => {
+    const files = await readZip(await createZip(ENTRIES));
+    expect(files.map((file) => file.name)).toEqual(ENTRIES.map((entry) => entry.name));
+    for (const [i, file] of files.entries()) {
+      const expected = new Uint8Array(await ENTRIES[i].data.arrayBuffer());
+      expect(new Uint8Array(await file.data.arrayBuffer())).toEqual(expected);
+      expect(file.crc).toBe(await crc32OfBlob(ENTRIES[i].data));
+    }
+  });
+
+  it("reads stored archives written by other tools, with a comment", async () => {
+    const file = join(workDir, "python.zip");
+    execFileSync("python3", [
+      "-c",
+      "import sys, zipfile\n" +
+      "with zipfile.ZipFile(sys.argv[1], 'w', zipfile.ZIP_STORED) as z:\n" +
+      "  z.comment = b'made by python'\n" +
+      "  z.writestr('dir/a.txt', 'hello')\n" +
+      "  z.writestr('b.bin', bytes(range(256)))\n",
+      file,
+    ]);
+    const files = await readZip(new Blob([readFileSync(file)]));
+    expect(files.map((entry) => entry.name)).toEqual(["dir/a.txt", "b.bin"]);
+    expect(await files[0].data.text()).toBe("hello");
+    expect(files[1].data.size).toBe(256);
+  });
+
+  it("refuses compressed archives", async () => {
+    const file = join(workDir, "deflated.zip");
+    execFileSync("python3", [
+      "-c",
+      "import sys, zipfile\n" +
+      "with zipfile.ZipFile(sys.argv[1], 'w', zipfile.ZIP_DEFLATED) as z:\n" +
+      "  z.writestr('a.txt', 'hello ' * 100)\n",
+      file,
+    ]);
+    await expect(readZip(new Blob([readFileSync(file)]))).rejects.toThrow(/Compressed/);
+  });
+
+  it("refuses files that are not ZIP archives, or are cut short", async () => {
+    await expect(readZip(new Blob(["not a zip at all"]))).rejects.toThrow(/damaged/);
+    await expect(readZip(new Blob([]))).rejects.toThrow(/damaged/);
+    const zip = await createZip(ENTRIES);
+    // Cut in the middle of the data: the end record is gone.
+    await expect(readZip(zip.slice(0, 3000))).rejects.toThrow(/damaged/);
   });
 });
