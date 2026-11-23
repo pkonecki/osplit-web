@@ -19,7 +19,7 @@ import {
   putModel,
 } from "./storage";
 
-const KEY = "fp16/vocals.fp16.onnx";
+const KEY = "fp32/vocals.onnx";
 const FILE = { key: KEY, label: "vocals" };
 const MODEL = new TextEncoder().encode("pretend this is an ONNX model");
 
@@ -89,21 +89,15 @@ describe("model list", () => {
 });
 
 describe("model files", () => {
-  it("lists one Spleeter file per stem and quality, and one Demucs file", () => {
-    expect(modelFiles("spleeter-5", "fp16").map((file) => file.key)).toEqual([
-      "fp16/vocals.fp16.onnx",
-      "fp16/piano.fp16.onnx",
-      "fp16/drums.fp16.onnx",
-      "fp16/bass.fp16.onnx",
-      "fp16/other.fp16.onnx",
+  it("lists one Spleeter file per stem, and one Demucs file", () => {
+    expect(modelFiles("spleeter-5").map((file) => file.key)).toEqual([
+      "fp32/vocals.onnx",
+      "fp32/piano.onnx",
+      "fp32/drums.onnx",
+      "fp32/bass.onnx",
+      "fp32/other.onnx",
     ]);
-    expect(modelFiles("spleeter-5", "fp32")[0].key).toBe("fp32/vocals.onnx");
-    // Demucs ships one FP32 file, whatever the project's quality.
-    for (const quality of ["fp16", "fp32"] as const) {
-      expect(modelFiles("htdemucs-6s", quality)).toEqual([
-        { key: DEMUCS_KEY, label: "Demucs" },
-      ]);
-    }
+    expect(modelFiles("htdemucs-6s")).toEqual([{ key: DEMUCS_KEY, label: "Demucs" }]);
   });
 });
 

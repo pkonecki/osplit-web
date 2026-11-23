@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 import {
+  addEmptyProject,
   createProjectWithClip,
   instrument,
   openApp,
@@ -55,8 +56,7 @@ async function dropFile(page: Page, name: string, type = "audio/wav"): Promise<v
 
 test("asks before deleting a project, in an accessible dialog", async ({ page }) => {
   await openApp(page);
-  await page.fill("#new-project-name", "Keep me?");
-  await page.click('[data-action="create"]');
+  await addEmptyProject(page, "Keep me?");
   await page.click('[data-action="home"]:visible');
   const card = page.locator('[data-action="delete"]');
   const dialog = page.locator("dialog.confirm-dialog");
@@ -83,10 +83,15 @@ test("asks before deleting a project, in an accessible dialog", async ({ page })
 test("drops audio to create a project or replace its source", async ({ page }) => {
   await openApp(page);
   // On the project list: a new project named after the file.
+  // On the library: a New split with the file, named after it.
   await dropFile(page, "Dropped Song.wav");
-  await expect(page.locator("h1")).toHaveText("Dropped Song");
-  await expect(page.locator(".page-subtitle")).toContainText("Dropped Song.wav");
+  const split = page.getByRole("dialog", { name: "New split" });
+  await expect(split).toContainText("Dropped Song.wav");
+  await expect(split.getByLabel("Name")).toHaveValue("Dropped Song");
+  await split.getByRole("button", { name: "Cancel" }).click();
+  expect(await readStore(page, "projects")).toHaveLength(0);
   // On a project page: the file becomes its source.
+  await addEmptyProject(page, "Dropped Song");
   await dropFile(page, "Second take.wav");
   await expect(page.locator("h1")).toHaveText("Dropped Song");
   await expect(page.locator(".page-subtitle")).toContainText("Second take.wav");

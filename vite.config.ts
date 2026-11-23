@@ -198,7 +198,7 @@ function serveAndPackageModels(): Plugin {
           return;
         }
         if (
-          !/^(?:(fp16|fp32)\/[a-z]+(?:\.fp16)?|htdemucs_6s\/htdemucs_6s)\.onnx$/
+          !/^(?:fp32\/[a-z]+|htdemucs_6s\/htdemucs_6s)\.onnx$/
             .test(requested)
         ) {
           response.statusCode = 404;

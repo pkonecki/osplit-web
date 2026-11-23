@@ -37,7 +37,6 @@ export interface ProjectLoop {
   end: number;
   enabled: boolean;
 }
-export type Quality = "fp16" | "fp32";
 export type ProjectStatus =
   | "empty"
   | "ready"
@@ -56,8 +55,11 @@ export interface Project {
   taskStage?: string;
   /** Separation model. Missing = Spleeter (projects saved before the choice). */
   model?: ModelId;
-  /** Spleeter's model files; Demucs has one quality. */
-  quality: Quality;
+  /**
+   * Spleeter's model files on projects from before there was only one
+   * (FP32); ignored, as every separation now uses FP32.
+   */
+  quality?: "fp16" | "fp32";
   completedStems: Stem[];
   /** Per-stem volume, 0–1. A missing stem plays at full volume. */
   volumes: Partial<Record<Stem, number>>;
@@ -209,7 +211,6 @@ export function newProject(
     taskProgress: 0,
     taskStage: "",
     model,
-    quality: "fp16",
     completedStems: [],
     volumes: {},
     mutedStems: [],

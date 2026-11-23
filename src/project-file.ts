@@ -310,7 +310,6 @@ function readProject(value: unknown): Project {
     project.status = value.status;
   }
   if (MODEL_IDS.includes(value.model)) project.model = value.model;
-  if (value.quality === "fp32") project.quality = "fp32";
   if (isRecord(value.volumes)) {
     // A stem with no volume plays at full volume.
     for (const stem of ALL_STEMS) {

@@ -18,7 +18,7 @@ import {
   SegmentAnalyzer,
   segmentFrames,
 } from "../stft";
-import { MODEL_STEMS, type Quality } from "../types";
+import { MODEL_STEMS } from "../types";
 import {
   createSession,
   type Provider,
@@ -32,17 +32,15 @@ import {
 export class SpleeterSeparator implements Separator {
   readonly stems = MODEL_STEMS["spleeter-5"];
   private sessions: ort.InferenceSession[] = [];
-  private readonly quality: Quality;
   private readonly context: SeparatorContext;
 
-  constructor(quality: Quality, context: SeparatorContext) {
-    this.quality = quality;
+  constructor(context: SeparatorContext) {
     this.context = context;
   }
 
   async load(provider: Provider): Promise<void> {
     const { context } = this;
-    const files = modelFiles("spleeter-5", this.quality);
+    const files = modelFiles("spleeter-5");
     try {
       for (let index = 0; index < files.length; index++) {
         context.checkCancelled();
@@ -105,7 +103,7 @@ export class SpleeterSeparator implements Separator {
       logitsToMasks(logits, stems.length, segmentFrames(plan, segment));
       synthesizer.synthesize(segment, analyzer.spectra, logits);
       context.report(
-        `Separating · ${this.quality.toUpperCase()}`,
+        "Separating",
         separationProgress(segment + 1, plan.segmentCount),
       );
       await yieldToEventLoop();

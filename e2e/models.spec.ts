@@ -3,8 +3,8 @@ import { createProjectWithClip, openApp, writeTestClip } from "./helpers";
 
 // Headless Chromium in CI has no WebGPU adapter, so Demucs is unavailable
 // there. The "available" cases replace navigator.gpu on the page with a stub:
-// they test the picker, not a Demucs separation, which needs a real GPU (see
-// docs/htdemucs-6s-plan.md).
+// they test the model choice, not a Demucs separation, which needs a real
+// GPU (see docs/htdemucs-6s-plan.md).
 
 let clip: string;
 
@@ -28,47 +28,80 @@ const status = (page: Page) => page.locator(".gpu-status");
 const spleeter = (page: Page) => page.locator('[data-action="model"][data-model="spleeter-5"]');
 const demucs = (page: Page) => page.locator('[data-action="model"][data-model="htdemucs-6s"]');
 
+/** The New split dialog, opened from the library. */
+async function newSplit(page: Page) {
+  await page.locator('[data-action="new-split"]:visible').first().click();
+  const dialog = page.getByRole("dialog", { name: "New split" });
+  await expect(dialog).toBeVisible();
+  return {
+    dialog,
+    spleeter: dialog.getByRole("radio", { name: /Spleeter/ }),
+    demucs: dialog.getByRole("radio", { name: /Demucs/ }),
+    start: dialog.getByRole("button", { name: /^Split into/ }),
+  };
+}
+
 test("offers only Spleeter without WebGPU", async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined });
   });
   await openApp(page);
+  const split = await newSplit(page);
+  await expect(split.spleeter).toHaveAttribute("aria-checked", "true");
+  await expect(split.demucs).toBeDisabled();
+  await expect(split.demucs).toContainText("Needs WebGPU, which this browser doesn't offer");
+  await expect(split.spleeter).toContainText("197 MB");
+  await expect(split.start).toHaveText("Split into 5 stems");
+  // Nothing to split until there is audio.
+  await expect(split.start).toBeDisabled();
+  await page.keyboard.press("Escape");
+
   await createProjectWithClip(page, "No GPU", clip);
   await expect(status(page)).toHaveText(
     "WebGPU: not available – separation runs on the CPU",
   );
   await expect(spleeter(page)).toHaveClass(/selected/);
   await expect(demucs(page)).toBeDisabled();
-  await expect(demucs(page)).toContainText("Needs WebGPU");
-  await expect(page.locator('[data-action="quality"]')).toHaveCount(2);
   await expect(page.locator('[data-action="separate"]')).toHaveText("Separate five stems");
 });
 
 test("offers Demucs without FP16 shaders (the model is FP32)", async ({ page }) => {
   await stubGpu(page, false);
   await openApp(page);
-  await createProjectWithClip(page, "No f16", clip);
-  await expect(status(page)).toHaveText("WebGPU: available");
-  await expect(demucs(page)).toHaveClass(/selected/);
-  await expect(demucs(page)).toBeEnabled();
+  const split = await newSplit(page);
+  await expect(split.demucs).toHaveAttribute("aria-checked", "true");
+  await expect(split.demucs).toBeEnabled();
+  await expect(split.demucs).toContainText("available on this device");
 });
 
 test("defaults to Demucs with WebGPU and says it is slower", async ({ page }) => {
   await stubGpu(page, true);
   await openApp(page);
-  await createProjectWithClip(page, "GPU", clip);
+  const split = await newSplit(page);
+  await expect(split.demucs).toHaveAttribute("aria-checked", "true");
+  await expect(split.demucs).toContainText("115 MB");
+  await expect(split.demucs).toContainText("Slower");
+  await expect(split.demucs).toContainText("Guitar");
+  await expect(split.start).toHaveText("Split into 6 stems");
+  await split.spleeter.click();
+  await expect(split.spleeter).toHaveAttribute("aria-checked", "true");
+  await expect(split.start).toHaveText("Split into 5 stems");
+  // Arrow keys move the choice, as in a radio group.
+  await split.spleeter.press("ArrowRight");
+  await expect(split.demucs).toHaveAttribute("aria-checked", "true");
+  await expect(split.demucs).toBeFocused();
+  await page.keyboard.press("Escape");
+
+  // On the project page, switching to Spleeter is saved.
+  await createProjectWithClip(page, "GPU", clip, "htdemucs-6s");
   await expect(status(page)).toHaveText("WebGPU: available");
   await expect(demucs(page)).toHaveClass(/selected/);
   await expect(demucs(page)).toContainText("6 stems · better, slower · 115 MB");
   await expect(page.locator(".model-hint")).toContainText("takes longer");
-  // Demucs has one quality.
   await expect(page.locator('[data-action="quality"]')).toHaveCount(0);
   await expect(page.locator('[data-action="separate"]')).toHaveText("Separate six stems");
-
-  // Switching to Spleeter is saved and brings its quality choice back.
   await spleeter(page).click();
   await expect(spleeter(page)).toHaveClass(/selected/);
-  await expect(page.locator('[data-action="quality"]')).toHaveCount(2);
   await expect(page.locator('[data-action="separate"]')).toHaveText("Separate five stems");
   // The app reopens the last project after a reload.
   await page.reload();
@@ -78,7 +111,7 @@ test("defaults to Demucs with WebGPU and says it is slower", async ({ page }) =>
 test("a Demucs project opened without WebGPU must switch to Spleeter to re-separate", async ({ page }) => {
   await stubGpu(page, true);
   await openApp(page);
-  await createProjectWithClip(page, "Moved", clip);
+  await createProjectWithClip(page, "Moved", clip, "htdemucs-6s");
   await expect(demucs(page)).toHaveClass(/selected/);
 
   const plain = await page.context().newPage();

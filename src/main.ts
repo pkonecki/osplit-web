@@ -20,7 +20,7 @@ import {
   setAutoSync,
   syncNow,
 } from "./cloud/cloud";
-import { defaultModel, detectGpu } from "./gpu";
+import { detectGpu } from "./gpu";
 import { enableIsolationReload } from "./isolation";
 import { appUrl } from "./paths";
 import {
@@ -114,7 +114,6 @@ import {
   type ModelId,
   newProject,
   type Project,
-  type Quality,
   type Track,
 } from "./types";
 import { renderDetail } from "./view/detail";
@@ -123,7 +122,9 @@ import { captureForm, restoreForm } from "./view/form-state";
 import { describeError, escapeHtml, formatBytes } from "./view/format";
 import { updatePlayerDisplay } from "./view/mixer";
 import { updateLoopDisplay, updatePracticeDisplay } from "./view/practice";
-import { renderProjects } from "./view/projects";
+import { applyLibraryFilter, library, renderProjects } from "./view/projects";
+import { newSplitOpen, openNewSplit } from "./view/new-split";
+import { forgetOpened, LIBRARY_FILTERS, markOpened } from "./library";
 import { renderSettings } from "./view/settings";
 import { shellMarkup } from "./view/shell";
 import { setTempoPanelOpen, tempoPanelOpen } from "./view/tempo";
@@ -241,7 +242,7 @@ async function start(): Promise<void> {
 }
 
 /** Imports a file shared, opened with or dropped on the app. */
-async function importFile(file: File): Promise<void> {
+async function importFile(file: File, dropped = false): Promise<void> {
   try {
     if (state.working) {
       throw new Error(
@@ -254,7 +255,14 @@ async function importFile(file: File): Promise<void> {
       if (!isAudioFile(file)) throw new Error(NOT_AUDIO_MESSAGE);
       await importSource(file);
     } else {
-      await importAsNewProject(file);
+      if (dropped) {
+        // Dropped on the library: start a New split with the file.
+        if (!isAudioFile(file)) throw new Error(NOT_AUDIO_MESSAGE);
+        await newSplit(file);
+      } else {
+        await importAsNewProject(file);
+        if (state.selectedProject) markOpened(state.selectedProject.id);
+      }
     }
   } catch (error) {
     showError(error);
@@ -403,6 +411,7 @@ async function render(): Promise<void> {
     root!.innerHTML = shellMarkup("library", await renderProjects());
     renderedView = "projects";
     restoreForm(snapshot, renderedView);
+    applyLibraryFilter();
   }
 }
 
@@ -415,25 +424,20 @@ async function handleClick(event: Event): Promise<void> {
   const id = button.dataset.id;
   try {
     switch (action) {
-      case "create": {
-        const name =
-          document.querySelector<HTMLInputElement>("#new-project-name")
-            ?.value ?? "";
-        state.selectedProject = await saveProject(newProject(name, defaultModel()));
-        localStorage.setItem("osplit-web-last-project", state.selectedProject.id);
-        state.screenMessage = "";
-        await render();
+      case "open":
+        await openProject(id ?? "");
+        break;
+      case "resume": {
+        const project = await openProject(id ?? "");
+        void withTaskLock(project.id, () => separateProject(project)).catch(showError);
         break;
       }
-      case "open":
-        state.page = "library";
-        state.selectedProject = (await getProject(id ?? "")) ?? null;
-        if (!state.selectedProject) {
-          throw new Error("That project no longer exists.");
-        }
-        localStorage.setItem("osplit-web-last-project", state.selectedProject.id);
-        await render();
+      case "library-filter": {
+        const filter = LIBRARY_FILTERS.find((item) => item.id === button.dataset.filter);
+        if (filter) library.filter = filter.id;
+        applyLibraryFilter();
         break;
+      }
       case "home":
         if (state.working) {
           throw new Error(
@@ -457,7 +461,7 @@ async function handleClick(event: Event): Promise<void> {
           );
         }
         await leaveProject("library");
-        document.querySelector<HTMLInputElement>("#new-project-name")?.focus();
+        await newSplit();
         break;
       case "delete": {
         if (!id) break;
@@ -484,6 +488,7 @@ async function handleClick(event: Event): Promise<void> {
           if (alsoCloud) await removeRemote(id);
           await deleteProject(id);
           forgetAnalysis(id);
+          forgetOpened(id);
           if (state.selectedProject?.id === id) state.selectedProject = null;
           await render();
         }
@@ -563,15 +568,6 @@ async function handleClick(event: Event): Promise<void> {
           await render();
         }
         break;
-      case "quality":
-        if (state.selectedProject && button.dataset.quality) {
-          state.selectedProject = await saveProject({
-            ...state.selectedProject,
-            quality: button.dataset.quality as Quality,
-          });
-          await render();
-        }
-        break;
       case "separate":
         if (state.selectedProject) {
           const project = state.selectedProject;
@@ -586,7 +582,8 @@ async function handleClick(event: Event): Promise<void> {
       case "download-url":
         if (state.selectedProject) {
           const project = state.selectedProject;
-          await withTaskLock(project.id, () => downloadFromUrl(project));
+          const url = document.querySelector<HTMLInputElement>("#media-url")?.value ?? "";
+          await withTaskLock(project.id, () => downloadFromUrl(project, url));
         }
         break;
       case "yt-update":
@@ -750,6 +747,48 @@ async function handleClick(event: Event): Promise<void> {
     state.screenMessage = describeError(error);
     await render();
   }
+}
+
+/** Opens a project's page. */
+async function openProject(id: string): Promise<Project> {
+  const project = await getProject(id);
+  if (!project) throw new Error("That project no longer exists.");
+  state.page = "library";
+  state.selectedProject = project;
+  state.screenMessage = "";
+  markOpened(project.id);
+  localStorage.setItem("osplit-web-last-project", project.id);
+  await render();
+  return project;
+}
+
+/**
+ * The New split dialog: makes a project from a file or a link, opens it and
+ * separates it (a link is downloaded first).
+ */
+async function newSplit(file?: File): Promise<void> {
+  if (state.working) {
+    throw new Error("Wait for the current task or cancel it before starting another split.");
+  }
+  if (newSplitOpen()) return;
+  const request = await openNewSplit(file);
+  if (!request) return;
+  let project = await saveProject(newProject(request.name, request.model));
+  if ("file" in request.source) {
+    project = await replaceSource(project, request.source.file, request.source.file.name);
+  }
+  await openProject(project.id);
+  if ("url" in request.source) {
+    const url = request.source.url;
+    await withTaskLock(project.id, () => downloadFromUrl(project, url));
+    const downloaded = await getProject(project.id);
+    // A failed or cancelled download leaves the project without audio.
+    if (!downloaded?.sourceName || downloaded.status !== "ready") return;
+    project = downloaded;
+  } else {
+    project = (await getProject(project.id)) ?? project;
+  }
+  void withTaskLock(project.id, () => separateProject(project)).catch(showError);
 }
 
 /** Closes the open project, if any, and shows the library or settings. */
@@ -1149,6 +1188,11 @@ async function saveMix(updated: Project): Promise<void> {
 /** Applies slider moves immediately; `handleChange` saves when released. */
 function handleInput(event: Event): void {
   const target = event.target as HTMLInputElement;
+  if (target.id === "library-search") {
+    library.query = target.value;
+    applyLibraryFilter();
+    return;
+  }
   if (target.id === "seek-bar") seekAll(Number(target.value));
   if (
     target.dataset.action === "volume" && state.selectedProject &&
@@ -1291,7 +1335,7 @@ root.addEventListener("drop", (event) => {
   const file = event.dataTransfer?.files[0];
   if (!file) return;
   event.preventDefault();
-  void importFile(file);
+  void importFile(file, true);
 });
 
 window.addEventListener("pagehide", () => {

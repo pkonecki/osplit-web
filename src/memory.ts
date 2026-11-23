@@ -1,11 +1,8 @@
 import { CHANNELS, wavByteLength } from "./audio-core";
-import { type ModelId, MODEL_STEMS, type Quality } from "./types";
+import { type ModelId, MODEL_STEMS } from "./types";
 
-/** Total size of the five Spleeter model files per quality. */
-const SPLEETER_FILE_BYTES: Record<Quality, number> = {
-  fp16: 98_400_000,
-  fp32: 196_600_000,
-};
+/** Total size of the five Spleeter model files (FP32). */
+const SPLEETER_FILE_BYTES = 196_600_000;
 
 /** The Demucs FP32 file (models/htdemucs_6s). */
 const DEMUCS_FILE_BYTES = 114_556_716;
@@ -19,8 +16,8 @@ const DEMUCS_FILE_BYTES = 114_556_716;
 const DEMUCS_SEGMENT_BYTES = 2_048 * 1024 ** 2;
 
 /** Download size of a model's files, for the model picker. */
-export function modelDownloadBytes(model: ModelId, quality: Quality): number {
-  return model === "htdemucs-6s" ? DEMUCS_FILE_BYTES : SPLEETER_FILE_BYTES[quality];
+export function modelDownloadBytes(model: ModelId): number {
+  return model === "htdemucs-6s" ? DEMUCS_FILE_BYTES : SPLEETER_FILE_BYTES;
 }
 
 /**
@@ -44,13 +41,12 @@ const DEVICE_MEMORY_SHARE = 0.25;
 export function estimateSeparationBytes(
   frameCount: number,
   model: ModelId,
-  quality: Quality,
 ): number {
   const input = frameCount * CHANNELS * 4;
   const stems = MODEL_STEMS[model].length * wavByteLength(frameCount);
   // One stem is copied at a time while the results are turned into Blobs.
   const blobCopy = wavByteLength(frameCount);
-  const models = modelDownloadBytes(model, quality) * MODEL_RUNTIME_FACTOR;
+  const models = modelDownloadBytes(model) * MODEL_RUNTIME_FACTOR;
   const working = model === "htdemucs-6s" ? DEMUCS_SEGMENT_BYTES : 0;
   return RUNTIME_BASE_BYTES + input + stems + blobCopy + models + working;
 }
@@ -69,7 +65,7 @@ export function isLongForDevice(
 }
 
 export const LONG_TRACK_WARNING =
-  "This track is long for this device. If separation stops, try Low quality or a shorter section.";
+  "This track is long for this device. If separation stops, try a shorter section.";
 
 /** Memory the decoded stems take for sample-accurate playback (float32). */
 export function decodedPlaybackBytes(frameCount: number, stemCount: number): number {

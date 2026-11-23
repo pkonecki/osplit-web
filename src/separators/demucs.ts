@@ -43,7 +43,7 @@ export class DemucsSeparator implements Separator {
       throw new Error("Demucs needs WebGPU. Separate with Spleeter instead.");
     }
     const { context } = this;
-    const [file] = modelFiles("htdemucs-6s", "fp32");
+    const [file] = modelFiles("htdemucs-6s");
     context.checkCancelled();
     const bytes = await loadModel(file, {
       onProgress: (fraction) =>

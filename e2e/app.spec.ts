@@ -100,7 +100,6 @@ test("shows an error when the source audio is missing", async ({ page }) => {
         updatedAt: now,
         sourceName: "ghost.wav",
         status: "ready",
-        quality: "fp16",
         completedStems: [],
         volumes: { vocals: 1, piano: 1, drums: 1, bass: 1, other: 1 },
         mutedStems: [],
@@ -124,19 +123,20 @@ test("keeps typed text when the page re-renders", async ({ page }) => {
   await createProjectWithClip(page, "Typing", clip);
   const url = page.locator("#media-url");
   await url.fill("https://example.com/song");
-  // Switching quality saves the project and re-renders the whole view.
-  await page.click('[data-action="quality"][data-quality="fp32"]');
-  await expect(page.locator('[data-quality="fp32"]')).toHaveClass(/selected/);
+  // Choosing the model saves the project and re-renders the whole view.
+  await page.click('[data-action="model"][data-model="spleeter-5"]');
+  await expect(page.locator('[data-model="spleeter-5"]')).toHaveClass(/selected/);
   await expect(url).toHaveValue("https://example.com/song");
 
   // A re-render while the field has focus keeps focus and the cursor
   // position (the button is clicked by script so focus stays in the field).
   await url.click();
   await url.press("Home");
-  await page.locator('[data-action="quality"][data-quality="fp16"]').evaluate(
+  const writes = await page.evaluate(() => window.__projectWrites);
+  await page.locator('[data-action="model"][data-model="spleeter-5"]').evaluate(
     (button: HTMLButtonElement) => button.click(),
   );
-  await expect(page.locator('[data-quality="fp16"]')).toHaveClass(/selected/);
+  await expect.poll(() => page.evaluate(() => window.__projectWrites)).toBeGreaterThan(writes);
   await expect(url).toHaveValue("https://example.com/song");
   await expect(url).toBeFocused();
   expect(await url.evaluate((input: HTMLInputElement) => input.selectionStart))
@@ -210,7 +210,7 @@ test("separates a clip and mixes the stems", async ({ page }) => {
     expect(stem.size).toBeLessThan(44 + 44_100 * 3 * 4);
   }
   const modelKeys = await readStore<string>(page, "models", "keys");
-  expect(modelKeys.filter((key) => /^fp16\/\w+\.fp16\.onnx@[0-9a-f]{64}$/.test(key)))
+  expect(modelKeys.filter((key) => /^fp32\/\w+\.onnx@[0-9a-f]{64}$/.test(key)))
     .toHaveLength(5);
 
   // Mixer: the stems play from decoded buffers, started together, with one
@@ -477,7 +477,7 @@ test("warns about a long track on a low-memory device", async ({ page, context }
 });
 
 test("rejects a tampered model and caches nothing", async ({ page, context }) => {
-  await context.route("**/models/fp16/vocals.fp16.onnx", async (route) => {
+  await context.route("**/models/fp32/vocals.onnx", async (route) => {
     const response = await route.fetch();
     const body = await response.body();
     body[1000] ^= 0xff;
@@ -492,7 +492,7 @@ test("rejects a tampered model and caches nothing", async ({ page, context }) =>
     { timeout: SEPARATION_TIMEOUT },
   );
   const modelKeys = await readStore<string>(page, "models", "keys");
-  expect(modelKeys.filter((key) => key.startsWith("fp16/vocals"))).toEqual([]);
+  expect(modelKeys.filter((key) => key.startsWith("fp32/vocals"))).toEqual([]);
 });
 
 test("a second tab sees a separation running in the first", async ({ page, context }) => {

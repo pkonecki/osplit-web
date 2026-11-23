@@ -9,26 +9,23 @@ const MB = 1024 ** 2;
 const FRAMES_PER_MINUTE = 44_100 * 60;
 
 describe("separation memory estimate", () => {
-  it("grows with track length and model quality", () => {
-    const oneMinute = estimateSeparationBytes(FRAMES_PER_MINUTE, "spleeter-5", "fp16");
-    const fiveMinutes = estimateSeparationBytes(5 * FRAMES_PER_MINUTE, "spleeter-5", "fp16");
+  it("grows with track length", () => {
+    const oneMinute = estimateSeparationBytes(FRAMES_PER_MINUTE, "spleeter-5");
+    const fiveMinutes = estimateSeparationBytes(5 * FRAMES_PER_MINUTE, "spleeter-5");
     expect(fiveMinutes).toBeGreaterThan(oneMinute);
-    expect(estimateSeparationBytes(FRAMES_PER_MINUTE, "spleeter-5", "fp32")).toBeGreaterThan(
-      oneMinute,
-    );
     // Audio buffers per stereo frame: 8 bytes of float input, plus 4 bytes
     // of 16-bit PCM for each of the five stems and the one Blob copy.
     expect(fiveMinutes - oneMinute).toBe(4 * FRAMES_PER_MINUTE * (8 + 6 * 4));
   });
 
   it("counts Demucs's sixth stem and its working memory", () => {
-    const spleeter = estimateSeparationBytes(FRAMES_PER_MINUTE, "spleeter-5", "fp16");
-    const demucs = estimateSeparationBytes(FRAMES_PER_MINUTE, "htdemucs-6s", "fp16");
+    const spleeter = estimateSeparationBytes(FRAMES_PER_MINUTE, "spleeter-5");
+    const demucs = estimateSeparationBytes(FRAMES_PER_MINUTE, "htdemucs-6s");
     // A smaller file, but a large working set per 7.8 s segment.
     expect(demucs - spleeter).toBeGreaterThan(1000 * MB);
     const perMinute = (model: "spleeter-5" | "htdemucs-6s") =>
-      estimateSeparationBytes(2 * FRAMES_PER_MINUTE, model, "fp16") -
-      estimateSeparationBytes(FRAMES_PER_MINUTE, model, "fp16");
+      estimateSeparationBytes(2 * FRAMES_PER_MINUTE, model) -
+      estimateSeparationBytes(FRAMES_PER_MINUTE, model);
     expect(perMinute("htdemucs-6s") - perMinute("spleeter-5")).toBe(FRAMES_PER_MINUTE * 4);
   });
 
@@ -40,19 +37,17 @@ describe("separation memory estimate", () => {
     expect(isLongForDevice(10_000 * MB, Number.NaN)).toBe(false);
   });
 
-  it("flags long tracks on a 4 GB phone but not ordinary songs", () => {
-    const longFor4Gb = (minutes: number, quality: "fp16" | "fp32") =>
+  it("flags long tracks on a 4 GB phone but not short ones", () => {
+    const longFor4Gb = (minutes: number) =>
       isLongForDevice(
-        estimateSeparationBytes(minutes * FRAMES_PER_MINUTE, "spleeter-5", quality),
+        estimateSeparationBytes(minutes * FRAMES_PER_MINUTE, "spleeter-5"),
         4,
       );
-    expect(longFor4Gb(4, "fp16")).toBe(false);
-    expect(longFor4Gb(8, "fp16")).toBe(true);
-    // High quality models need about 300 MB more.
-    expect(longFor4Gb(4, "fp32")).toBe(true);
+    expect(longFor4Gb(1)).toBe(false);
+    expect(longFor4Gb(8)).toBe(true);
     // A computer with 8 GB or more handles a 10-minute track.
     expect(
-      isLongForDevice(estimateSeparationBytes(10 * FRAMES_PER_MINUTE, "spleeter-5", "fp16"), 8),
+      isLongForDevice(estimateSeparationBytes(10 * FRAMES_PER_MINUTE, "spleeter-5"), 8),
     ).toBe(false);
   });
 });
