@@ -75,7 +75,7 @@ test("works offline after the first visit", async ({ page, context }) => {
   await page.evaluate(() => navigator.serviceWorker.ready);
   await context.setOffline(true);
   await page.reload();
-  await expect(page.locator("h1")).toHaveText("Your projects");
+  await expect(page.locator("h1")).toHaveText("Library");
   expect(await page.evaluate(() => crossOriginIsolated)).toBe(true);
   await page.goto("README-web.html");
   await expect(page).toHaveTitle("OSplit Web — Browser notes");

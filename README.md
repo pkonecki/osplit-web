@@ -447,3 +447,7 @@ cite Demucs v4:
 The OSplit Web code is released under the [MIT License](./LICENSE). The models
 are covered by the Spleeter and Demucs licenses above. Pitch shifting uses Signalsmith
 Stretch by Geraint Luff, released under the MIT License.
+The app bundles the Inter and Space Grotesk fonts (`src/fonts/`), both under
+the SIL Open Font License 1.1; their licenses are next to the files. They are
+served from the app itself, so the Content-Security-Policy's `font-src 'self'`
+holds, and the service worker caches them for offline use.

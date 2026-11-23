@@ -124,6 +124,8 @@ import { describeError, escapeHtml, formatBytes } from "./view/format";
 import { updatePlayerDisplay } from "./view/mixer";
 import { updateLoopDisplay, updatePracticeDisplay } from "./view/practice";
 import { renderProjects } from "./view/projects";
+import { renderSettings } from "./view/settings";
+import { shellMarkup } from "./view/shell";
 import { setTempoPanelOpen, tempoPanelOpen } from "./view/tempo";
 import {
   chordForBox,
@@ -373,7 +375,7 @@ async function render(): Promise<void> {
     ) ?? null;
   }
   if (state.selectedProject) {
-    root!.innerHTML = renderDetail(state.selectedProject);
+    root!.innerHTML = shellMarkup("project", renderDetail(state.selectedProject));
     renderedView = `project:${state.selectedProject.id}`;
     restoreForm(snapshot, renderedView);
     // Loading the player (decoding the stems) runs in the background; the
@@ -391,9 +393,14 @@ async function render(): Promise<void> {
         })
         .catch(console.warn);
     }
+  } else if (state.page === "settings") {
+    releasePlayers();
+    root!.innerHTML = shellMarkup("settings", await renderSettings());
+    renderedView = "settings";
+    restoreForm(snapshot, renderedView);
   } else {
     releasePlayers();
-    root!.innerHTML = await renderProjects();
+    root!.innerHTML = shellMarkup("library", await renderProjects());
     renderedView = "projects";
     restoreForm(snapshot, renderedView);
   }
@@ -419,6 +426,7 @@ async function handleClick(event: Event): Promise<void> {
         break;
       }
       case "open":
+        state.page = "library";
         state.selectedProject = (await getProject(id ?? "")) ?? null;
         if (!state.selectedProject) {
           throw new Error("That project no longer exists.");
@@ -432,12 +440,24 @@ async function handleClick(event: Event): Promise<void> {
             "Wait for the current task or cancel it before leaving this project.",
           );
         }
-        state.selectedProject = null;
-        localStorage.removeItem("osplit-web-last-project");
-        state.screenMessage = "";
-        await render();
-        // Changes made in the project go up when leaving it.
-        if (cloudConnection() && autoSync()) void runCloudSync(false);
+        await leaveProject("library");
+        break;
+      case "settings":
+        if (state.working && state.selectedProject) {
+          throw new Error(
+            "Wait for the current task or cancel it before leaving this project.",
+          );
+        }
+        await leaveProject("settings");
+        break;
+      case "new-split":
+        if (state.working && state.selectedProject) {
+          throw new Error(
+            "Wait for the current task or cancel it before leaving this project.",
+          );
+        }
+        await leaveProject("library");
+        document.querySelector<HTMLInputElement>("#new-project-name")?.focus();
         break;
       case "delete": {
         if (!id) break;
@@ -730,6 +750,18 @@ async function handleClick(event: Event): Promise<void> {
     state.screenMessage = describeError(error);
     await render();
   }
+}
+
+/** Closes the open project, if any, and shows the library or settings. */
+async function leaveProject(page: "library" | "settings"): Promise<void> {
+  const wasOpen = state.selectedProject !== null;
+  state.selectedProject = null;
+  state.page = page;
+  localStorage.removeItem("osplit-web-last-project");
+  state.screenMessage = "";
+  await render();
+  // Changes made in the project go up when leaving it.
+  if (wasOpen && cloudConnection() && autoSync()) void runCloudSync(false);
 }
 
 /** Plays (`play` true) or pauses the project player. */

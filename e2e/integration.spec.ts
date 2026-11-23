@@ -57,7 +57,7 @@ test("asks before deleting a project, in an accessible dialog", async ({ page })
   await openApp(page);
   await page.fill("#new-project-name", "Keep me?");
   await page.click('[data-action="create"]');
-  await page.click('[data-action="home"] >> nth=1');
+  await page.click('[data-action="home"]:visible');
   const card = page.locator('[data-action="delete"]');
   const dialog = page.locator("dialog.confirm-dialog");
 
@@ -85,11 +85,11 @@ test("drops audio to create a project or replace its source", async ({ page }) =
   // On the project list: a new project named after the file.
   await dropFile(page, "Dropped Song.wav");
   await expect(page.locator("h1")).toHaveText("Dropped Song");
-  await expect(page.locator(".project-heading .muted")).toContainText("Dropped Song.wav");
+  await expect(page.locator(".page-subtitle")).toContainText("Dropped Song.wav");
   // On a project page: the file becomes its source.
   await dropFile(page, "Second take.wav");
   await expect(page.locator("h1")).toHaveText("Dropped Song");
-  await expect(page.locator(".project-heading .muted")).toContainText("Second take.wav");
+  await expect(page.locator(".page-subtitle")).toContainText("Second take.wav");
   expect(await readStore(page, "projects")).toHaveLength(1);
   // Anything else is refused with a message.
   await dropFile(page, "notes.txt", "text/plain");
@@ -113,7 +113,7 @@ test("opens a file shared to the installed app", async ({ page }) => {
   expect(new URL(status.url).searchParams.get("shared")).toBe("1");
   await page.goto(status.url);
   await expect(page.locator("h1")).toHaveText("Shared Song");
-  await expect(page.locator(".project-heading .muted")).toContainText("Shared Song.m4a");
+  await expect(page.locator(".page-subtitle")).toContainText("Shared Song.m4a");
   // The address no longer asks to import it again.
   expect(new URL(page.url()).searchParams.has("shared")).toBe(false);
   const [source] = await readStore<{ name: string; blob: Blob }>(page, "sources");
@@ -195,7 +195,7 @@ test("moves a project to another device in a project file", async ({ page, brows
   }).toBe(1);
 
   const download = page.waitForEvent("download");
-  await page.click('.project-heading [data-action="export-project"]');
+  await page.click('.page-actions [data-action="export-project"]');
   const file = await download;
   expect(file.suggestedFilename()).toBe("Travelling song.osplit");
   const path = testInfo.outputPath("Travelling song.osplit");
@@ -224,7 +224,7 @@ test("moves a project to another device in a project file", async ({ page, brows
 
   // Importing it again asks what to do: keep both adds a copy.
   const again = device.waitForEvent("filechooser");
-  await device.click('[data-action="home"] >> nth=1');
+  await device.click('[data-action="home"]:visible');
   await device.click('[data-action="import-project"]');
   await (await again).setFiles(path);
   const dialog = device.locator("dialog.confirm-dialog");
@@ -235,7 +235,7 @@ test("moves a project to another device in a project file", async ({ page, brows
   expect(await readStore(device, "stems")).toHaveLength(10);
 
   // Anything else is refused with a message.
-  await device.click('[data-action="home"] >> nth=1');
+  await device.click('[data-action="home"]:visible');
   const wrong = device.waitForEvent("filechooser");
   await device.click('[data-action="import-project"]');
   await (await wrong).setFiles(clip);
