@@ -64,11 +64,11 @@ Existing means the logic is already in the app and only the UI changes.
 | Subdivision (8ths, triplets, 16ths) | **New** | — |
 | Count-in (off, 1 bar, 2 bars) | **New** | — |
 | A–B loop, loop on/off | Existing | `loop-set`, `loop-toggle`, `loop-clear` |
-| Loop 1 / 2 / 4 / 8 bars from the playhead | Existing, **not drawn yet** | `loop-bars` — keep it, e.g. in the Loop chip |
+| Loop 1 / 2 / 4 / 8 bars from the playhead, clear the loop | Existing, **not drawn yet** | `loop-bars`, `loop-clear` — in a small panel from the Loop chip, with the A and B points |
 | Markers, jump, loop a section | **New** | — |
 | Capo: show chord shapes for a capo position; the audio does not change | **New** | builds on the chord naming used by `chord-names` |
 | Mix presets (Full mix, No vocals, Drums + bass), fixed list | **New** | — |
-| Announce chord changes | Existing, **not drawn yet** | `announce-chords` — keep it, in the Key sheet or Settings |
+| Announce chord changes | **Removed** | `announce-chords` and its code in `harmony.ts` go |
 
 ### Library, new split, settings
 
@@ -153,7 +153,7 @@ then be dropped from new projects.
 Each one ships with unit tests, Playwright coverage (`e2e/`) and README
 updates where behaviour changes, as earlier milestones did.
 
-1. **Shell and design tokens.** Colours, type (Inter, Space Grotesk) and
+1. **Shell and design tokens.** Colours, bundled fonts (Inter, Space Grotesk) and
    spacing as CSS custom properties in `src/style.css`; the desktop rail and
    mobile layouts; routing between library, project and settings. No feature
    changes.
@@ -211,6 +211,38 @@ updates where behaviour changes, as earlier milestones did.
 
 PRs 1 to 7 change no stored data except markers and the dropped quality;
 8 adds features, and 9 changes how sync chooses what to upload.
+
+---
+
+## Decisions
+
+- **Fonts:** Inter and Space Grotesk are bundled with the app (both under the
+  SIL Open Font License), as `woff2` files served from `'self'`. The CSP's
+  `font-src 'self'` stays; no Google Fonts. Ship only the weights used
+  (Inter 400–700, Space Grotesk 500–700), and let the service worker cache
+  them for offline use.
+- **Theme:** dark only.
+- **Layouts by width:** under 768 px, the mobile layout (tabs Chords / Mixer
+  / Export, bottom sheets). From 768 to 1199 px, the desktop layout with the
+  mixer as a panel that opens and closes. From 1200 px, the full desktop
+  layout.
+- **Keyboard shortcuts** (desktop; ignored while typing in a field or when a
+  slider has focus): Space play or pause, ← / → previous or next bar,
+  Shift+← / Shift+→ previous or next marker, ↑ / ↓ speed +5 % / −5 %,
+  L loop on or off, M add a marker, Home back to the start. No bracket keys:
+  they move around on non-US layouts.
+- **Loop panel:** the Loop chip opens a small panel with the A and B points,
+  loop 1 / 2 / 4 / 8 bars from the playhead, and Clear.
+- **Announce chord changes:** removed.
+- **Time signatures** beyond 3/4 and 4/4 are set by hand; detection still
+  finds 3/4 or 4/4.
+- **No cloud connected:** the library hides sync icons and the sync line,
+  New split hides "Add to the cloud when done", and Settings offers Connect
+  Dropbox / Connect OneDrive.
+- **Library order:** most recently opened first, no sort control.
+- **No WebGPU:** the Demucs card is disabled, with the reason.
+- **States not drawn yet** (below) are designed in the PR that needs them,
+  with the same components.
 
 ---
 
