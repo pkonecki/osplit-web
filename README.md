@@ -106,11 +106,85 @@ Firefox 153+, or Safari 27+. Downloaded runtime updates are checked against
 the SHA-256 digest published by PyPI.
 
 Projects are scoped to this browser profile and device. Clearing site data
-removes them. OSplit asks the browser to preserve its storage when supported,
+removes them; export the ones to keep as project files first (see below). OSplit asks the browser to preserve its storage when supported,
 but browser quota and eviction policies still apply. Stems are stored as
 lossless FLAC, typically about half the size of WAV. Exports are FLAC by
 default, or WAV when chosen in the mixer, and are saved through the browser's
 download handling.
+
+## Moving projects between devices
+
+**Export project file** (on a project page, or *Export* in the project list)
+saves a project as one `.osplit` file: its source audio (when kept), stems,
+waveforms, tempo and chord analysis with your corrections, and its mixer and
+practice settings. Models are not included; the other device downloads them
+only if it separates again. A file is about the size of the stems plus the
+source, roughly 100 MB for a 4-minute song.
+
+Move the file any way you like (AirDrop, a USB drive, a synced cloud folder,
+email for short tracks), then open it with **Import project file** on the
+project list, by dropping it on the app, or with "Open with OSplit" where the
+installed app handles `.osplit` files. Importing a project that is already on
+the device asks whether to replace it or keep both. Files are checked when
+imported: a damaged file is refused, and an export made mid-separation comes
+back as interrupted. The files also work as backups.
+
+The file is a ZIP archive (uncompressed) with an `osplit.json` manifest; see
+`src/project-file.ts` for the layout. Files from a newer version of OSplit ask
+for an update rather than importing partly.
+
+### Cloud sync (Dropbox, OneDrive)
+
+Optionally, projects sync to the user's own Dropbox or OneDrive. The panel
+appears only in builds made with an app id (below). **Connect Dropbox** or
+**Connect OneDrive** signs in on the provider's page and comes back; OSplit
+then sees only its own app folder there (`Apps/<app name>/`).
+
+- **Sync now** uploads projects changed on this device and updates projects
+  changed on another one: the most recent change wins. With **Sync
+  automatically** (on by default) a sync also runs when the app opens and
+  when you leave a project.
+- Projects that are only in the cloud are listed under *In Dropbox, not on
+  this device*, to **Download** when wanted, so a sync doesn't fill a phone's
+  storage. Deleting a project here asks whether to delete its cloud copy too.
+- Projects being separated sync after they finish. Models are never
+  uploaded.
+- Each project is a folder: `project.json` (the project file manifest, plus
+  each file's SHA-256) and its files under `blobs/`, named by content. A
+  change to the mixer or the grid uploads only `project.json`, and a download
+  reuses the files the device already has. Every downloaded file is checked
+  against its hash. See `src/cloud/sync.ts`.
+
+Sign-in uses OAuth 2.0 with PKCE and a redirect, with no backend and no
+client secret. The tokens are kept in the browser's local storage. Dropbox
+keeps the app signed in until you disconnect. Microsoft limits single-page
+apps to 24-hour sign-ins, so OneDrive asks you to sign in again after a day
+without use; signing in again is usually one click.
+
+To offer cloud sync in your deployment, register an app with each provider
+and build with its id (these are public ids, not secrets):
+
+- **Dropbox** ([App Console](https://www.dropbox.com/developers/apps)):
+  Scoped access, *App folder*. Under Permissions enable
+  `files.metadata.read`, `files.content.read` and `files.content.write`.
+  Under OAuth 2 add the site URL (with its trailing slash, e.g.
+  `https://example.com/` or `https://user.github.io/osplit-web/`) as a
+  redirect URI and allow PKCE ("Allow public clients"). Build with
+  `VITE_DROPBOX_APP_KEY=<app key>`.
+- **OneDrive** ([Microsoft Entra app registrations](https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade)):
+  supported accounts *Personal Microsoft accounts and accounts in any
+  organizational directory*; platform **Single-page application** with the
+  site URL as the redirect URI; delegated Microsoft Graph permission
+  `Files.ReadWrite.AppFolder`. Build with
+  `VITE_ONEDRIVE_CLIENT_ID=<application (client) id>`, and
+  `VITE_ONEDRIVE_TENANT=consumers` for an app registered for personal
+  accounts only.
+
+The GitHub Pages workflow reads `DROPBOX_APP_KEY` and `ONEDRIVE_CLIENT_ID`
+from the repository's Actions variables; the Docker build takes them as build
+arguments (`--build-arg VITE_DROPBOX_APP_KEY=…`). For local development, put
+them in `.env.local`. The Content-Security-Policy already allows the
+requests (`connect-src https:`).
 
 ## Practice tools
 

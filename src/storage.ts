@@ -281,6 +281,88 @@ export async function replaceSource(
   });
 }
 
+/** Everything stored for one project, as a project file holds it. */
+export interface ProjectData {
+  project: Project;
+  source?: StoredBlob;
+  stems: Partial<Record<Stem, Blob>>;
+  peaks: Partial<Record<Stem, Float32Array>>;
+  analysis?: AnalysisRecord;
+}
+
+/** Reads a project and all its data, as of one moment. */
+export async function readProjectData(id: string): Promise<ProjectData | undefined> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([PROJECTS, SOURCES, STEM_BLOBS, PEAKS, ANALYSIS], "readonly");
+    const project = tx.objectStore(PROJECTS).get(id);
+    const source = tx.objectStore(SOURCES).get(id);
+    const stems = tx.objectStore(STEM_BLOBS).getAll(projectStemRange(id));
+    const peaks = tx.objectStore(PEAKS).getAll(projectStemRange(id));
+    const analysis = tx.objectStore(ANALYSIS).get(id);
+    const stemOf = (key: string) => key.slice(id.length + 1) as Stem;
+    tx.oncomplete = () => {
+      if (!project.result) {
+        resolve(undefined);
+        return;
+      }
+      resolve({
+        project: project.result as Project,
+        source: source.result as StoredBlob | undefined,
+        stems: Object.fromEntries(
+          (stems.result as StoredBlob[]).map((record) => [stemOf(record.id), record.blob]),
+        ),
+        peaks: Object.fromEntries(
+          (peaks.result as StoredPeaks[]).map((record) => [stemOf(record.id), record.peaks]),
+        ),
+        analysis: analysis.result as AnalysisRecord | undefined,
+      });
+    };
+    tx.onerror = () => reject(tx.error ?? new Error("Could not read the project."));
+    tx.onabort = () => reject(tx.error ?? new Error("Reading the project was aborted."));
+  });
+}
+
+/**
+ * Saves a project and all its data, replacing whatever was stored under its
+ * id, in one transaction: an import either lands whole or not at all. The
+ * project counts as changed now, unless `keepUpdatedAt` (a cloud download
+ * keeps the time of the change it brings).
+ */
+export async function writeProjectData(
+  data: ProjectData,
+  { keepUpdatedAt = false } = {},
+): Promise<Project> {
+  const db = await openDatabase();
+  const id = data.project.id;
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([PROJECTS, SOURCES, STEM_BLOBS, PEAKS, ANALYSIS], "readwrite");
+    const project = keepUpdatedAt ? data.project : { ...data.project, updatedAt: Date.now() };
+    tx.objectStore(SOURCES).delete(id);
+    tx.objectStore(STEM_BLOBS).delete(projectStemRange(id));
+    tx.objectStore(PEAKS).delete(projectStemRange(id));
+    tx.objectStore(ANALYSIS).delete(id);
+    tx.objectStore(PROJECTS).put(project);
+    if (data.source) tx.objectStore(SOURCES).put({ ...data.source, id } satisfies StoredBlob);
+    for (const stem of ALL_STEMS) {
+      const blob = data.stems[stem];
+      if (blob) {
+        tx.objectStore(STEM_BLOBS).put(
+          { id: `${id}:${stem}`, blob, name: `${stem}.${audioExtension(blob)}` } satisfies StoredBlob,
+        );
+      }
+      const peaks = data.peaks[stem];
+      if (peaks) {
+        tx.objectStore(PEAKS).put({ id: `${id}:${stem}`, peaks } satisfies StoredPeaks);
+      }
+    }
+    if (data.analysis) tx.objectStore(ANALYSIS).put({ ...data.analysis, projectId: id });
+    tx.oncomplete = () => resolve(project);
+    tx.onerror = () => reject(tx.error ?? new Error("Could not save the imported project."));
+    tx.onabort = () => reject(tx.error ?? new Error("Saving the imported project was aborted."));
+  });
+}
+
 export function getSource(projectId: string): Promise<StoredBlob | undefined> {
   return transaction(
     [SOURCES],
@@ -437,15 +519,20 @@ export function getAnalysis(projectId: string): Promise<AnalysisRecord | undefin
   );
 }
 
-/** Saves an analysis, unless its project was deleted meanwhile. */
+/**
+ * Saves an analysis, unless its project was deleted meanwhile. The project
+ * counts as changed, so cloud sync picks up grid and key corrections.
+ */
 export async function putAnalysis(record: AnalysisRecord): Promise<boolean> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const tx = db.transaction([PROJECTS, ANALYSIS], "readwrite");
-    const request = tx.objectStore(PROJECTS).getKey(record.projectId);
+    const request = tx.objectStore(PROJECTS).get(record.projectId);
     let saved = false;
     request.onsuccess = () => {
-      if (request.result === undefined) return;
+      const project = request.result as Project | undefined;
+      if (project === undefined) return;
+      tx.objectStore(PROJECTS).put({ ...project, updatedAt: Date.now() });
       tx.objectStore(ANALYSIS).put(record);
       saved = true;
     };

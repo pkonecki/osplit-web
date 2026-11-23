@@ -42,6 +42,9 @@ export function renderDetail(project: Project): string {
         <p class="muted">Saved in this browser · ${
     escapeHtml(project.sourceName ?? "No audio source yet")
   }</p>
+        <button class="button subtle" data-action="export-project" data-id="${
+    escapeHtml(project.id)
+  }" title="Save this project with its audio, stems and analysis, to open it in OSplit on another device">Export project file</button>
       </section>
       <section class="source-row">
         <button class="button secondary" data-action="import" ${
@@ -169,7 +172,10 @@ function renderModelPicker(project: Project, gpu: GpuSupport, busy: boolean): st
 }
 
 export function fileInputMarkup(): string {
-  return `<input id="audio-file" type="file" accept="${AUDIO_ACCEPT}" hidden />`;
+  // The project file input has no accept list: iOS greys out files whose
+  // extension it doesn't know, such as .osplit. The file is checked on import.
+  return `<input id="audio-file" type="file" accept="${AUDIO_ACCEPT}" hidden />
+    <input id="project-file" type="file" hidden />`;
 }
 
 export function messageMarkup(message: string): string {
