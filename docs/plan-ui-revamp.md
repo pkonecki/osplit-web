@@ -66,8 +66,8 @@ Existing means the logic is already in the app and only the UI changes.
 | A–B loop, loop on/off | Existing | `loop-set`, `loop-toggle`, `loop-clear` |
 | Loop 1 / 2 / 4 / 8 bars from the playhead | Existing, **not drawn yet** | `loop-bars` — keep it, e.g. in the Loop chip |
 | Markers, jump, loop a section | **New** | — |
-| Capo | **New**, not specified yet | — |
-| Mix presets (Full mix, No vocals, Drums + bass) | **New** | — |
+| Capo: show chord shapes for a capo position; the audio does not change | **New** | builds on the chord naming used by `chord-names` |
+| Mix presets (Full mix, No vocals, Drums + bass), fixed list | **New** | — |
 | Announce chord changes | Existing, **not drawn yet** | `announce-chords` — keep it, in the Key sheet or Settings |
 
 ### Library, new split, settings
@@ -124,11 +124,18 @@ with `soloStems`.
   `GridEdits.downbeatShift` or `bpmFactor` changes, bar numbers change
   meaning: store the marker's time as well and snap it to the nearest bar when
   the grid changes.
-- `clickAccent?: boolean` (default true), `clickSubdivision?: 1 | 2 | 3 | 4`,
-  `countInBars?: 0 | 1 | 2` — only if those features are kept (see open
-  questions).
-- `BeatsPerBar` widens if more time signatures are kept. 6/8 and 7/8 need the
-  grid to know the beat unit, not only the count.
+- `clickAccent?: boolean` (default true), `clickSubdivision?: 1 | 2 | 3 | 4`
+  (off, 8ths, triplets, 16ths), `countInBars?: 0 | 1 | 2`.
+- `BeatsPerBar` widens to 2/4, 3/4, 4/4, 5/4, 6/8 and 7/8. 6/8 and 7/8 need
+  the grid to know the beat unit, not only the count: store the metre as
+  `{ beats, unit }` in `GridEdits`, and let the click accent and the bar
+  lines follow it.
+- `capo?: number` (0 to 11 frets). The chart shows each chord as the shape
+  played with the capo: the sounding chord transposed down by `capo`
+  semitones, after any key shift when "chords in the new key" is on. The
+  header shows "Capo 3". The .txt chord export uses the names shown.
+- Mix presets are a fixed list in code; applying one sets the mixer's
+  volumes, mutes and solos, and any change afterwards makes it "custom".
 - No sync field is needed: `cloudState()` in `src/cloud/cloud.ts` already gives
   each project's state from the last sync.
 
@@ -163,8 +170,10 @@ updates where behaviour changes, as earlier milestones did.
 6. **Export and project menu.** The shared Export panel, the ⋯ menu, rename,
    delete with confirmation; markers as headings in the .txt chord chart.
 7. **Settings.** Storage, models (delete and download), WebGPU status, yt-dlp.
-8. **Rhythm extras** (only those kept): more time signatures, accent switch,
-   subdivision, count-in.
+8. **Rhythm extras and capo.** More time signatures, the accent switch,
+   subdivision and count-in (the click plays the count-in bars before the
+   playhead, also when a loop restarts), and the Capo sheet (a stepper, 0 to
+   11, not drawn yet).
 9. **Cloud sync.** Sync exists (the user's own Dropbox or OneDrive; there is
    no OSplit account or backend). Changes:
    - Automatic sync and **Sync now** only update projects that are both on
@@ -224,11 +233,10 @@ Design these as part of the PR that needs them:
 
 ## Open questions
 
-- Which rhythm extras to keep: time signatures beyond 3/4 and 4/4,
-  subdivision, the accent switch, count-in.
-- What Capo does: shows chord shapes for a capo position without changing the
-  audio, like the "chords in the new key" switch?
-- Mix presets: fixed, or saved by the user?
+None left. Decided so far: all rhythm extras stay; Capo only changes the
+chord names shown; mix presets are a fixed list for now; "Add to the cloud
+when done" uploads even with automatic sync off; projects changed in two
+places get a warning and a choice.
 
 ---
 
