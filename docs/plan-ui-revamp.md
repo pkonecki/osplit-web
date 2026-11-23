@@ -131,9 +131,11 @@ with `soloStems`.
   `{ beats, unit }` in `GridEdits`, and let the click accent and the bar
   lines follow it.
 - `capo?: number` (0 to 11 frets). The chart shows each chord as the shape
-  played with the capo: the sounding chord transposed down by `capo`
-  semitones, after any key shift when "chords in the new key" is on. The
-  header shows "Capo 3". The .txt chord export uses the names shown.
+  played with the capo: the chord as it sounds (after the key shift, whatever
+  the "chords in the new key" switch says) transposed down by `capo`
+  semitones. The header shows "Capo 3". The .txt chord export uses the names
+  shown. The Capo sheet also suggests the three capo positions that give the
+  most open shapes (C, A, G, E, D, Am, Em, Dm) for the song's main chords.
 - Mix presets are a fixed list in code; applying one sets the mixer's
   volumes, mutes and solos, and any change afterwards makes it "custom".
 - No sync field is needed: `cloudState()` in `src/cloud/cloud.ts` already gives
@@ -172,8 +174,7 @@ updates where behaviour changes, as earlier milestones did.
 7. **Settings.** Storage, models (delete and download), WebGPU status, yt-dlp.
 8. **Rhythm extras and capo.** More time signatures, the accent switch,
    subdivision and count-in (the click plays the count-in bars before the
-   playhead, also when a loop restarts), and the Capo sheet (a stepper, 0 to
-   11, not drawn yet).
+   playhead, also when a loop restarts), and the Capo sheet and popover.
 9. **Cloud sync.** Sync exists (the user's own Dropbox or OneDrive; there is
    no OSplit account or backend). Changes:
    - Automatic sync and **Sync now** only update projects that are both on
