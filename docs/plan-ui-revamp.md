@@ -234,6 +234,8 @@ PRs 1 to 7 change no stored data except markers and the dropped quality;
 - **Loop panel:** the Loop chip opens a small panel with the A and B points,
   loop 1 / 2 / 4 / 8 bars from the playhead, and Clear.
 - **Announce chord changes:** removed.
+- **Renaming and deleting a marker:** long-press its heading (mobile) or
+  right-click it (desktop) for a small menu with Rename and Delete.
 - **Time signatures** beyond 3/4 and 4/4 are set by hand; detection still
   finds 3/4 or 4/4.
 - **No cloud connected:** the library hides sync icons and the sync line,
