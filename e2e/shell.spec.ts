@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { openApp } from "./helpers";
+import { addEmptyProject, openApp } from "./helpers";
 
 // The app frame: the desktop rail, the phone headers, and moving between
 // the library, a project and the settings.
@@ -20,14 +20,14 @@ test("desktop rail moves between the library, settings and a project", async ({ 
   await rail.getByRole("button", { name: "Library" }).click();
   await expect(page.locator("h1")).toHaveText("Library");
 
-  await page.fill("#new-project-name", "Rail song");
-  await page.click('[data-action="create"]');
-  await expect(page.locator("h1")).toHaveText("Rail song");
+  await addEmptyProject(page, "Rail song");
   // Back buttons are for phones; the rail leads home.
   await expect(page.getByRole("button", { name: "Back to library" })).toBeHidden();
   await rail.getByRole("button", { name: "New split" }).click();
   await expect(page.locator("h1")).toHaveText("Library");
-  await expect(page.locator("#new-project-name")).toBeFocused();
+  await expect(page.getByRole("dialog", { name: "New split" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "New split" })).toHaveCount(0);
 
   // The bundled fonts load from the app itself.
   await page.evaluate(() => document.fonts.ready);
@@ -44,9 +44,7 @@ test("phone layout has page headers instead of the rail", async ({ page }) => {
   await page.getByRole("button", { name: "Back to library" }).click();
   await expect(page.locator("h1")).toHaveText("Library");
 
-  await page.fill("#new-project-name", "Phone song");
-  await page.click('[data-action="create"]');
-  await expect(page.locator("h1")).toHaveText("Phone song");
+  await addEmptyProject(page, "Phone song");
   await page.getByRole("button", { name: "Back to library" }).click();
   await expect(page.locator("h1")).toHaveText("Library");
   // No sideways scrolling at phone width.

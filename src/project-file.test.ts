@@ -320,10 +320,10 @@ describe("project files", () => {
       name: "Imported project",
       speed: 1.5,
       semitones: -12,
-      quality: "fp16",
       mutedStems: ["vocals"],
       status: "ready",
     });
+    expect(read.quality).toBeUndefined();
     expect(read.volumes).toMatchObject({ vocals: 1, piano: 1 });
     expect(read.loop).toBeUndefined();
   });

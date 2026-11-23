@@ -8,7 +8,6 @@ import {
   type ModelId,
   type Project,
   projectModel,
-  type Quality,
 } from "../types";
 import { escapeHtml, statusLabel } from "./format";
 import { renderMixer } from "./mixer";
@@ -115,15 +114,9 @@ function renderModelPicker(project: Project, gpu: GpuSupport, busy: boolean): st
     `<button class="quality ${model === id ? "selected" : ""}" data-action="model" data-model="${id}" ${
       busy || !enabled ? "disabled" : ""
     }>${title} <small>${detail}</small></button>`;
-  const quality = (id: Quality, title: string) =>
-    `<button class="quality ${project.quality === id ? "selected" : ""}" data-action="quality" data-quality="${id}" ${
-      busy ? "disabled" : ""
-    }>${title} <small>${id.toUpperCase()} · ${
-      megabytes(modelDownloadBytes("spleeter-5", id))
-    }</small></button>`;
   const hint = model === "htdemucs-6s"
     ? demucsOk
-      ? "Demucs separates better than Spleeter but takes longer: about 1.2× Spleeter High quality on a desktop GPU, more on weaker ones. Its piano stem is weak (its authors say so)."
+      ? "Demucs separates better than Spleeter but takes longer: about 1.2× Spleeter on a desktop GPU, more on weaker ones. Its piano stem is weak (its authors say so)."
       : "Demucs needs WebGPU, which this browser does not offer. Choose Spleeter to separate here; the saved stems stay."
     : "Spleeter is fast and runs on any device.";
   return `
@@ -132,30 +125,19 @@ function renderModelPicker(project: Project, gpu: GpuSupport, busy: boolean): st
     escapeHtml(gpuStatusText(gpu, busy ? state.provider : null))
   }</p><p class="muted">Models are downloaded and cached on first use.</p></div>
         <div class="quality-buttons">
-          ${option("spleeter-5", "Spleeter", "5 stems · fast", true)}
+          ${option("spleeter-5", "Spleeter", `5 stems · fast · ${megabytes(modelDownloadBytes("spleeter-5"))}`, true)}
           ${
     option(
       "htdemucs-6s",
       "Demucs v4",
       demucsOk
-        ? `6 stems · better, slower · ${megabytes(modelDownloadBytes("htdemucs-6s", "fp32"))}`
+        ? `6 stems · better, slower · ${megabytes(modelDownloadBytes("htdemucs-6s"))}`
         : "Needs WebGPU",
       demucsOk,
     )
   }
         </div>
       </section>
-      ${
-    model === "spleeter-5"
-      ? `<section class="quality-row">
-        <div><h2>Spleeter quality</h2></div>
-        <div class="quality-buttons">
-          ${quality("fp32", "High quality")}
-          ${quality("fp16", "Low quality")}
-        </div>
-      </section>`
-      : ""
-  }
       <p class="hint model-hint">${escapeHtml(hint)}</p>`;
 }
 

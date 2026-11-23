@@ -78,14 +78,14 @@ is available:
 
 - **Demucs v4** (`htdemucs_6s`): six stems (vocals, guitar, piano, drums,
   bass, other) and clearly better separation, but slower than Spleeter (about
-  1.2× Spleeter High quality on a Radeon RX 7800, more on weaker GPUs), and its
+  1.2× Spleeter on a Radeon RX 7800, more on weaker GPUs), and its
   piano stem is weak. It needs WebGPU and never runs on the
   CPU; it is the default for new projects where WebGPU is available. The first
   run downloads 115 MB.
 - **Spleeter**: five stems (vocals, piano, drums, bass, other), fast, on any
   device: WebGPU when available, otherwise the WebAssembly CPU provider. The
-  first run downloads about 98 MB for Low quality (FP16) or 197 MB for High
-  quality (FP32).
+  first run downloads 197 MB (FP32). Projects saved with the former Low
+  quality (FP16) option separate with these files too.
 
 The ONNX Runtime is downloaded as well. Separating again with the other model
 replaces all of the project's stems. `scripts/export-htdemucs.py` converts
@@ -419,7 +419,7 @@ for public production use. Port 8080 is available for local smoke testing at
 The separation models are the pretrained 5-stems models of
 [Spleeter](https://github.com/deezer/spleeter) by Deezer Research, converted to
 ONNX: one model per stem (vocals, piano, drums, bass, other), in full (FP32)
-and half (FP16) precision. Like the original models, they cover frequencies up
+precision. Like the original models, they cover frequencies up
 to about 11 kHz, so separated stems contain nothing above that.
 
 Spleeter and its models are released under the MIT License by Deezer SA; see

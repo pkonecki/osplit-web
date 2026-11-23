@@ -52,13 +52,13 @@ jobs:
           for file in index.html sw.js manifest.webmanifest yt-dlp/wheel.json; do
             test -s "dist/$file" || { echo "::error::dist/$file is missing"; exit 1; }
           done
-          for quality in fp16 fp32; do
-            count=$(find "dist/models/$quality" -name '*.onnx' -size +1M | wc -l)
-            if [ "$count" -ne 5 ]; then
-              echo "::error::Expected 5 $quality models over 1 MB in dist/models/$quality, found $count"
-              exit 1
-            fi
-          done
+          count=$(find dist/models/fp32 -name '*.onnx' -size +1M | wc -l)
+          if [ "$count" -ne 5 ]; then
+            echo "::error::Expected 5 Spleeter models over 1 MB in dist/models/fp32, found $count"
+            exit 1
+          fi
+          # The former FP16 Spleeter models are gone.
+          test ! -e dist/models/fp16
           # Demucs v4: one FP32 file.
           count=$(find dist/models/htdemucs_6s -name '*.onnx' -size +1M | wc -l)
           if [ "$count" -ne 1 ]; then
@@ -151,14 +151,14 @@ jobs:
           }
           asset=$(curl -fsS http://127.0.0.1:8080/ | grep -o '/assets/index-[^"]*\.js' | head -n 1)
           test -n "$asset"
-          for path in / /sw.js /manifest.webmanifest "$asset" /models/fp16/bass.fp16.onnx; do
+          for path in / /sw.js /manifest.webmanifest "$asset" /models/fp32/bass.onnx; do
             expect_header "$path" "Cross-Origin-Opener-Policy: same-origin"
             expect_header "$path" "Cross-Origin-Embedder-Policy: require-corp"
           done
           expect_header / "Cache-Control: no-cache"
           expect_header /sw.js "Cache-Control: no-cache"
           expect_header "$asset" "Cache-Control: public, max-age=31536000, immutable"
-          expect_header /models/fp16/bass.fp16.onnx "Cache-Control: public, max-age=86400"
+          expect_header /models/fp32/bass.onnx "Cache-Control: public, max-age=86400"
           for path in / /sw.js "$asset"; do
             expect_header "$path" "X-Content-Type-Options: nosniff"
             expect_header "$path" "Referrer-Policy: no-referrer"

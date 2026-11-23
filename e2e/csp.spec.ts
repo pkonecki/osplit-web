@@ -83,12 +83,14 @@ test("starts the URL downloader without CSP violations", async ({ page }) => {
     timeout: 120_000,
   });
   await openApp(page);
-  await page.fill("#new-project-name", "URL");
-  await page.click('[data-action="create"]');
   // Any URL starts the runtime; this one is not a media page, so the
   // download itself ends with an error message.
-  await page.fill("#media-url", new URL("manifest.webmanifest", page.url()).href);
-  await page.click('[data-action="download-url"]');
+  await page.locator('[data-action="new-split"]:visible').first().click();
+  const split = page.getByRole("dialog", { name: "New split" });
+  await split.getByRole("button", { name: "Link" }).click();
+  await split.getByLabel("Audio or video link").fill(new URL("manifest.webmanifest", page.url()).href);
+  await split.getByLabel("Name").fill("URL");
+  await split.getByRole("button", { name: /^Split into/ }).click();
   await pyodide;
   await expect(page.locator('[data-action="download-url"]')).toBeEnabled({
     timeout: 180_000,

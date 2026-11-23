@@ -63,7 +63,7 @@ export async function separateProject(project: Project): Promise<void> {
     const frameCount = samples.length / CHANNELS;
     if (
       isLongForDevice(
-        estimateSeparationBytes(frameCount, model, project.quality),
+        estimateSeparationBytes(frameCount, model),
         (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
       )
     ) {
@@ -106,7 +106,7 @@ export async function separateProject(project: Project): Promise<void> {
             event,
             model === "htdemucs-6s"
               ? "The separation stopped unexpectedly. This is usually the browser running out of memory: try Spleeter or a shorter track."
-              : "The separation stopped unexpectedly. This is usually the browser running out of memory: try Low quality or a shorter track.",
+              : "The separation stopped unexpectedly. This is usually the browser running out of memory: try a shorter track.",
           ),
         );
       worker.postMessage(
@@ -114,7 +114,6 @@ export async function separateProject(project: Project): Promise<void> {
           type: "separate",
           id,
           model,
-          quality: project.quality,
           samples,
         } satisfies InferenceRequest,
         [samples.buffer],

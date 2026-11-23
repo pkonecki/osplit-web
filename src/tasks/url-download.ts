@@ -24,9 +24,9 @@ export function terminateUrlWorker(): void {
   urlWorker?.terminate();
 }
 
-export async function downloadFromUrl(project: Project): Promise<void> {
-  const input = document.querySelector<HTMLInputElement>("#media-url");
-  const url = input?.value.trim();
+/** Downloads the audio at `url` as the project's source, in the browser. */
+export async function downloadFromUrl(project: Project, link: string): Promise<void> {
+  const url = link.trim();
   if (!url) throw new Error("Enter a media URL.");
   if (!/^https?:\/\//i.test(url)) {
     throw new Error("Enter a valid http or https URL.");

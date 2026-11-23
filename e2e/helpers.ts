@@ -180,17 +180,89 @@ export async function openApp(page: Page, path = "./"): Promise<void> {
   await expect(page.locator("h1")).toBeVisible();
 }
 
+/**
+ * Adds an empty project straight to storage (the UI only makes projects
+ * with audio, from New split) and opens it.
+ */
+export async function addEmptyProject(
+  page: Page,
+  name: string,
+  model: "spleeter-5" | "htdemucs-6s" = "spleeter-5",
+): Promise<void> {
+  await page.evaluate(async ({ name, model }) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("osplit-pwa");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const now = Date.now();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction("projects", "readwrite");
+      tx.objectStore("projects").put({
+        id: crypto.randomUUID(),
+        name,
+        createdAt: now,
+        updatedAt: now,
+        sourceName: null,
+        status: "empty",
+        taskProgress: 0,
+        taskStage: "",
+        model,
+        completedStems: [],
+        volumes: {},
+        mutedStems: [],
+        soloStems: [],
+        errorMessage: null,
+      });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  }, { name, model });
+  await page.reload();
+  await page.waitForFunction(() => crossOriginIsolated);
+  // The page may reopen the last project; go to the library first.
+  const home = page.locator('[data-action="home"]:visible');
+  if (await home.count()) await home.first().click();
+  await page.locator(".project-row", { hasText: name }).locator('[data-action="open"]').first().click();
+  await expect(page.locator("h1")).toHaveText(name);
+}
+
+/** An empty project with the clip as its audio, not separated yet. */
 export async function createProjectWithClip(
   page: Page,
   name: string,
   clip: string,
+  model?: "spleeter-5" | "htdemucs-6s",
 ): Promise<void> {
-  await page.fill("#new-project-name", name);
-  await page.click('[data-action="create"]');
+  await addEmptyProject(page, name, model);
   const chooser = page.waitForEvent("filechooser");
   await page.click('[data-action="import"]');
   await (await chooser).setFiles(clip);
   await expect(page.locator('[data-action="separate"]')).toBeVisible();
+}
+
+/**
+ * Starts a split from the library with the New split dialog: the clip, a
+ * name and optionally a model. The project page opens, separating.
+ */
+export async function startSplit(
+  page: Page,
+  name: string,
+  clip: string,
+  model?: "spleeter-5" | "htdemucs-6s",
+): Promise<void> {
+  await page.locator('[data-action="new-split"]:visible').first().click();
+  const dialog = page.getByRole("dialog", { name: "New split" });
+  await expect(dialog).toBeVisible();
+  const chooser = page.waitForEvent("filechooser");
+  await dialog.getByRole("button", { name: "Choose a file" }).click();
+  await (await chooser).setFiles(clip);
+  await dialog.getByLabel("Name").fill(name);
+  if (model) await dialog.locator(`[data-model="${model}"]`).click();
+  await dialog.getByRole("button", { name: /^Split into/ }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator("h1")).toHaveText(name);
 }
 
 /** Records every distinct progress value and label shown from now on. */
@@ -245,14 +317,13 @@ export function readStore<T = unknown>(
 
 export const SEPARATION_TIMEOUT = 3 * 60 * 1000;
 
-/** Creates a project from the clip and separates it. */
+/** Splits the clip from the library and waits for the stems. */
 export async function separateClip(
   page: Page,
   name: string,
   clip: string,
 ): Promise<void> {
-  await createProjectWithClip(page, name, clip);
-  await page.click('[data-action="separate"]');
+  await startSplit(page, name, clip);
   await expect(page.locator('[data-action="export-mix"]')).toBeVisible({
     timeout: SEPARATION_TIMEOUT,
   });

@@ -5,7 +5,7 @@ import {
   latestModelVariant,
   putModel,
 } from "./storage";
-import { type ModelId, MODEL_STEMS, type Quality, type Stem } from "./types";
+import { type ModelId, MODEL_STEMS, type Stem } from "./types";
 
 /** Size and SHA-256 of one model file, from the build's models/models.json. */
 export interface ModelEntry {
@@ -13,15 +13,13 @@ export interface ModelEntry {
   sha256: string;
 }
 
-/** Model entries keyed by path below models/, e.g. "fp16/bass.fp16.onnx". */
+/** Model entries keyed by path below models/, e.g. "fp32/bass.onnx". */
 export type ModelManifest = Record<string, ModelEntry>;
 
 export const MODEL_MANIFEST_PATH = "models/models.json";
 
-export function spleeterKey(quality: Quality, stem: Stem): string {
-  return quality === "fp16"
-    ? `fp16/${stem}.fp16.onnx`
-    : `fp32/${stem}.onnx`;
+export function spleeterKey(stem: Stem): string {
+  return `fp32/${stem}.onnx`;
 }
 
 export const DEMUCS_KEY = "htdemucs_6s/htdemucs_6s.onnx";
@@ -33,13 +31,13 @@ export interface ModelFile {
 }
 
 /**
- * The files a separation downloads: Spleeter has one per stem and quality,
- * Demucs a single FP32 file whatever the project's quality.
+ * The files a separation downloads: Spleeter has one per stem, Demucs a
+ * single file. Both are FP32.
  */
-export function modelFiles(model: ModelId, quality: Quality): ModelFile[] {
+export function modelFiles(model: ModelId): ModelFile[] {
   if (model === "htdemucs-6s") return [{ key: DEMUCS_KEY, label: "Demucs" }];
   return MODEL_STEMS["spleeter-5"].map((stem) => ({
-    key: spleeterKey(quality, stem),
+    key: spleeterKey(stem),
     label: stem,
   }));
 }

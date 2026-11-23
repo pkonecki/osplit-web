@@ -1,4 +1,4 @@
-import type { ModelId, Quality, Stem } from "./types";
+import type { ModelId, Stem } from "./types";
 import type { RhythmResult } from "./analysis/rhythm";
 import type { TonalResult } from "./analysis/tonal";
 
@@ -8,8 +8,6 @@ export type InferenceRequest =
     type: "separate";
     id: string;
     model: ModelId;
-    /** Spleeter's model files; Demucs has one quality. */
-    quality: Quality;
     samples: Float32Array;
   }
   | { type: "cancel"; id: string };

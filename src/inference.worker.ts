@@ -48,7 +48,7 @@ function separatorFor(request: SeparateRequest): Separator {
   const context = contextFor(request.id);
   return request.model === "htdemucs-6s"
     ? new DemucsSeparator(context)
-    : new SpleeterSeparator(request.quality, context);
+    : new SpleeterSeparator(context);
 }
 
 async function separate(request: SeparateRequest): Promise<void> {
