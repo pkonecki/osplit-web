@@ -8,8 +8,8 @@ what each screen reuses, what is new, and in which order to build it.
 OSplit's rules still hold:
 
 - separation and analysis run on the device, with no processing server;
-- the app keeps working offline once installed (cloud sync is an extra, never
-  a requirement);
+- the app keeps working offline once installed (cloud sync, to the user's own
+  Dropbox or OneDrive, is optional);
 - both playback engines keep working (`BufferEngine` and `MediaEngine`);
 - the static site still deploys under the strict CSP.
 
@@ -88,7 +88,12 @@ Existing means the logic is already in the app and only the UI changes.
 | Models: downloaded or not, delete, download | **New UI**; caching exists | `src/models.ts`, `storage.ts` |
 | WebGPU status | Existing | `src/gpu.ts` |
 | yt-dlp update | Existing, moved to Settings | `yt-update` |
-| Cloud sync, accounts, storage | **New** | — |
+| Connect Dropbox or OneDrive, disconnect | Existing | `cloud-connect`, `cloud-disconnect` (`src/cloud/`) |
+| Sync now, sync automatically | Existing | `cloud-sync`, `setAutoSync` |
+| Sync state per project: synced, changed, this device only | Existing | `cloudState()` |
+| Cloud-only projects: download, remove from the cloud | Existing | `cloud-download`, `cloud-remove` |
+| Upload one project, "Remove from this device" | **New** | sync is library-wide today |
+| Export and import a project file (.osplit) | Existing, **not drawn yet** | `export-project`, `import-project` |
 
 ### Export
 
@@ -119,8 +124,8 @@ with `soloStems`.
   questions).
 - `BeatsPerBar` widens if more time signatures are kept. 6/8 and 7/8 need the
   grid to know the beat unit, not only the count.
-- `sync?: { state: "local" | "cloud" | "both"; revision?: string }` — only with
-  cloud sync.
+- No sync field is needed: `cloudState()` in `src/cloud/cloud.ts` already gives
+  each project's state from the last sync.
 
 Spleeter low quality goes away: remove `models/fp16/`, the `fp16` entry in
 `src/memory.ts` and the quality buttons. Keep reading old projects whose
@@ -155,13 +160,16 @@ updates where behaviour changes, as earlier milestones did.
 7. **Settings.** Storage, models (delete and download), WebGPU status, yt-dlp.
 8. **Rhythm extras** (only those kept): more time signatures, accent switch,
    subdivision, count-in.
-9. **Cloud sync.** Accounts, upload and download, sync state per project,
-   "Save to the cloud when done", "Remove from this device". Needs a service
-   and its own plan: what is uploaded (stems, original audio, analysis),
-   conflicts between devices, and storage limits.
+9. **Cloud sync UI.** Sync already exists (Dropbox or OneDrive, library-wide,
+   automatic or "Sync now"). This PR moves it into the new screens: sync
+   state icons in the library (adding the "changed, not synced yet" state the
+   mockups lack), cloud-only projects in the list with Download, the
+   connection and "sync automatically" in Settings, and the .osplit project
+   file export and import. Uploading one project and "Remove from this
+   device" are new and need changes in `src/cloud/`.
 
 PRs 1 to 7 change no stored data except markers and the dropped quality;
-8 and 9 add features.
+8 adds features, and 9 adds the per-project cloud actions.
 
 ---
 
@@ -188,8 +196,13 @@ Design these as part of the PR that needs them:
 - What Capo does: shows chord shapes for a capo position without changing the
   audio, like the "chords in the new key" switch?
 - Mix presets: fixed, or saved by the user?
-- Cloud: what is uploaded, and whether a synced project can be removed from a
-  device and kept in the cloud (the mockups assume yes).
+- Cloud: the mockups show an OSplit account and a cloud quota; the app
+  connects the user's own Dropbox or OneDrive instead, so Settings should show
+  "Connected to Dropbox as …", **Sync now** and "Sync automatically", and
+  probably no quota. The "Save to the cloud when done" switch in New split
+  then duplicates "Sync automatically": keep one.
+- Cloud: whether a synced project can be removed from a device and kept in
+  the cloud (the mockups assume yes).
 
 ---
 
