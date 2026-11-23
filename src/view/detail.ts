@@ -1,6 +1,5 @@
 import { type GpuSupport, knownGpu, modelAvailable } from "../gpu";
 import { modelDownloadBytes } from "../memory";
-import { appUrl } from "../paths";
 import { state } from "../state";
 import { AUDIO_ACCEPT } from "../tasks/import";
 import { urlTaskActive } from "../tasks/url-download";
@@ -13,6 +12,7 @@ import {
 } from "../types";
 import { escapeHtml, statusLabel } from "./format";
 import { renderMixer } from "./mixer";
+import { footerMarkup, pageHeader } from "./shell";
 
 export function renderDetail(project: Project): string {
   const complete = project.completedStems.length > 0;
@@ -25,27 +25,15 @@ export function renderDetail(project: Project): string {
   // Marked as processing but not by this tab: another tab holds its lock.
   const elsewhere = !state.working && project.status === "processing";
   return `
-    <header class="topbar">
-      <button class="brand brand-button" data-action="home">
-        <span class="brand-mark"><img src="${appUrl("icon.svg")}" alt="" /></span>
-        <span><strong>OSPLIT</strong><small>ON-DEVICE STEM STUDIO</small></span>
-      </button>
-      <button class="button subtle" data-action="home" ${
-    state.working ? "disabled" : ""
-  }>Projects</button>
-    </header>
-    <main class="layout detail">
+    <main class="content detail">
+      ${pageHeader(escapeHtml(project.name), {
+    back: true,
+    subtitle: `Saved in this browser · ${escapeHtml(project.sourceName ?? "No audio source yet")}`,
+    actions: `<button class="button subtle" data-action="export-project" data-id="${
+      escapeHtml(project.id)
+    }" title="Save this project with its audio, stems and analysis, to open it in OSplit on another device">Export project file</button>`,
+  })}
       ${state.screenMessage ? messageMarkup(state.screenMessage) : ""}
-      <section class="project-heading">
-        <p class="eyebrow">PROJECT</p>
-        <h1>${escapeHtml(project.name)}</h1>
-        <p class="muted">Saved in this browser · ${
-    escapeHtml(project.sourceName ?? "No audio source yet")
-  }</p>
-        <button class="button subtle" data-action="export-project" data-id="${
-    escapeHtml(project.id)
-  }" title="Save this project with its audio, stems and analysis, to open it in OSplit on another device">Export project file</button>
-      </section>
       <section class="source-row">
         <button class="button secondary" data-action="import" ${
     busy ? "disabled" : ""
@@ -100,8 +88,8 @@ export function renderDetail(project: Project): string {
   }
       ${complete ? renderMixer(project) : ""}
       <p class="notice">The browser may suspend processing when this tab is in the background. Task status is saved, but work is not guaranteed to continue after the tab is closed.</p>
+      ${footerMarkup()}
     </main>
-    <footer>OSplit Web · IndexedDB local storage · <a href="${appUrl("README-web.html")}">Browser limitations</a></footer>
     ${fileInputMarkup()}
   `;
 }

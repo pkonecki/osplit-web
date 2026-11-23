@@ -4,6 +4,8 @@ import type { Project } from "./types";
 export const state = {
   projects: [] as Project[],
   selectedProject: null as Project | null,
+  /** The page shown when no project is open. */
+  page: "library" as "library" | "settings",
   /** Progress of the running task, 0–100, and its stage label. */
   progress: 0,
   progressLabel: "",

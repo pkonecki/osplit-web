@@ -1,4 +1,3 @@
-import { appUrl } from "../paths";
 import { state } from "../state";
 import { storageEstimate } from "../storage";
 import type { Project } from "../types";
@@ -6,6 +5,8 @@ import { connection } from "../cloud/cloud";
 import { cloudNote, cloudPanelMarkup } from "./cloud";
 import { fileInputMarkup, messageMarkup } from "./detail";
 import { escapeHtml, formatBytes, statusLabel } from "./format";
+import { icon } from "./icons";
+import { footerMarkup, pageHeader } from "./shell";
 
 export async function renderProjects(): Promise<string> {
   const estimate = await storageEstimate();
@@ -14,28 +15,17 @@ export async function renderProjects(): Promise<string> {
     ? formatBytes(estimate.quota)
     : "browser managed";
   const cloud = connection();
-  const updateLabel = state.working
-    ? "Checking / updating yt-dlp…"
-    : "Check yt-dlp update";
   return `
-    <header class="topbar">
-      <a class="brand" href="#" aria-label="OSplit home">
-        <span class="brand-mark"><img src="${appUrl("icon.svg")}" alt="" /></span>
-        <span><strong>OSPLIT</strong><small>ON-DEVICE STEM STUDIO</small></span>
-      </a>
-      <button class="button subtle" data-action="yt-update" ${
-    state.working ? "disabled" : ""
-  }>${updateLabel}</button>
-    </header>
-    <main class="layout">
-      <section class="intro">
-        <p class="eyebrow">LOCAL STEM STUDIO</p>
-        <h1>Your projects</h1>
-        <p class="muted">Separate audio into vocals, piano, drums, bass, and other. ${
-    cloud ? `Your projects stay in this browser and sync to your ${escapeHtml(cloud.label)}.` : "Your audio and projects stay in this browser."
-  }</p>
-        <div class="storage-note">Browser storage: ${used} used · ${total} available. Models are downloaded only when first needed.</div>
-      </section>
+    <main class="content library">
+      ${pageHeader("Library", {
+    subtitle: cloud
+      ? `Separation runs on this device. Projects sync to your ${escapeHtml(cloud.label)}.`
+      : "Separation runs on this device. Your audio and projects stay in this browser.",
+    actions: `<button class="icon-button mobile-only" data-action="settings" aria-label="Settings" ${
+      state.working ? "disabled" : ""
+    }>${icon("settings", 22)}</button>`,
+  })}
+      <div class="storage-note">Browser storage: ${used} used · ${total} available. Models are downloaded only when first needed.</div>
       ${state.screenMessage ? messageMarkup(state.screenMessage) : ""}
       <section class="create-card">
         <label for="new-project-name">Create a project</label>
@@ -58,8 +48,8 @@ export async function renderProjects(): Promise<string> {
       : `<section class="empty-card"><span class="empty-wave">▂ ▅ ▇ ▅ ▂</span><h3>No projects yet</h3><p class="muted">Create a project first. You can add audio or URL input at any time.</p></section>`
   }
       <p class="notice">Processing runs locally while this app is open. If the browser stops it, project state is saved and you can retry.</p>
+      ${footerMarkup()}
     </main>
-    <footer>OSplit Web · local-only projects · <a href="${appUrl("README-web.html")}">Browser limitations</a></footer>
     ${fileInputMarkup()}
   `;
 }
