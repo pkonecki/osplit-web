@@ -92,8 +92,12 @@ Existing means the logic is already in the app and only the UI changes.
 | Sync now, sync automatically | Existing | `cloud-sync`, `setAutoSync` |
 | Sync state per project: synced, changed, this device only | Existing | `cloudState()` |
 | Cloud-only projects: download, remove from the cloud | Existing | `cloud-download`, `cloud-remove` |
-| Upload one project, "Remove from this device" | **New** | sync is library-wide today |
-| Export and import a project file (.osplit) | Existing, **not drawn yet** | `export-project`, `import-project` |
+| Automatic sync only for projects in both places | **Change** | `planSync()` also uploads projects that are only on this device |
+| Upload one project, download one project (manual) | Upload is **new**; download exists | `uploadProject()`, `cloud-download` |
+| "Add to the cloud when done" in New split | **New** | upload after the split and analysis |
+| "Remove from this device" (keeps the cloud copy) | **New** | delete the local copy only |
+| Cloud storage: used, total, free, and OSplit's share | **New** | provider quota API; OSplit's share is the sum of `RemoteProject.size` |
+| Export and import a project file (.osplit) | Existing | `export-project`, `import-project`; now in the ⋯ menu and the library header |
 
 ### Export
 
@@ -160,16 +164,29 @@ updates where behaviour changes, as earlier milestones did.
 7. **Settings.** Storage, models (delete and download), WebGPU status, yt-dlp.
 8. **Rhythm extras** (only those kept): more time signatures, accent switch,
    subdivision, count-in.
-9. **Cloud sync UI.** Sync already exists (Dropbox or OneDrive, library-wide,
-   automatic or "Sync now"). This PR moves it into the new screens: sync
-   state icons in the library (adding the "changed, not synced yet" state the
-   mockups lack), cloud-only projects in the list with Download, the
-   connection and "sync automatically" in Settings, and the .osplit project
-   file export and import. Uploading one project and "Remove from this
-   device" are new and need changes in `src/cloud/`.
+9. **Cloud sync.** Sync exists (the user's own Dropbox or OneDrive; there is
+   no OSplit account or backend). Changes:
+   - Automatic sync and **Sync now** only update projects that are both on
+     this device and in the cloud: `planSync()` stops uploading projects
+     that have no cloud copy. Upload and download stay manual, per project.
+   - Per-project **Upload** (new, around `uploadProject()`) and
+     **Download** (exists).
+   - "Add to the cloud when done" in New split: upload once the split and
+     analysis finish, then the project syncs automatically.
+   - "Remove from this device": delete the local copy; the project becomes
+     cloud only.
+   - Sync states in the library: synced, changed (not synced yet), this
+     device only, cloud only, uploading, downloading.
+   - Settings: "Connected to Dropbox as …", Disconnect, cloud storage (used,
+     total, free, OSplit's share), "Sync automatically", **Sync now** and the
+     last sync time. Quota needs a new call per provider (Dropbox
+     `users/get_space_usage`, OneDrive `GET /me/drive` `quota`), added to the
+     `CloudStore` interface.
+   - The .osplit project file: **Save as project file** in the ⋯ menu,
+     **Import project file** in the library header.
 
 PRs 1 to 7 change no stored data except markers and the dropped quality;
-8 adds features, and 9 adds the per-project cloud actions.
+8 adds features, and 9 changes how sync chooses what to upload.
 
 ---
 
@@ -183,7 +200,9 @@ Design these as part of the PR that needs them:
 - not enough storage, before and during a split;
 - a link download that failed;
 - a project opened before analysis finishes: no chords, bars or markers yet;
-- signed out of the cloud, or offline, with projects that are cloud only;
+- not connected to a cloud (Settings shows Connect Dropbox / Connect
+  OneDrive; the library hides sync icons), the connection expired
+  (`needsReconnect`), or offline, with projects that are cloud only;
 - renaming and deleting a marker;
 - a tablet width, between the mobile and desktop layouts.
 
@@ -196,13 +215,10 @@ Design these as part of the PR that needs them:
 - What Capo does: shows chord shapes for a capo position without changing the
   audio, like the "chords in the new key" switch?
 - Mix presets: fixed, or saved by the user?
-- Cloud: the mockups show an OSplit account and a cloud quota; the app
-  connects the user's own Dropbox or OneDrive instead, so Settings should show
-  "Connected to Dropbox as …", **Sync now** and "Sync automatically", and
-  probably no quota. The "Save to the cloud when done" switch in New split
-  then duplicates "Sync automatically": keep one.
-- Cloud: whether a synced project can be removed from a device and kept in
-  the cloud (the mockups assume yes).
+- Cloud: when "Sync automatically" is off, does "Add to the cloud when
+  done" still upload? (The mockups assume yes: it is a one-off upload.)
+- Cloud: a project changed on two devices before a sync. Today the newest
+  `updatedAt` wins; keep that, or warn?
 
 ---
 
