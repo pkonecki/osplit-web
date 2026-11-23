@@ -96,6 +96,7 @@ Existing means the logic is already in the app and only the UI changes.
 | Upload one project, download one project (manual) | Upload is **new**; download exists | `uploadProject()`, `cloud-download` |
 | "Add to the cloud when done" in New split | **New** | upload after the split and analysis |
 | "Remove from this device" (keeps the cloud copy) | **New** | delete the local copy only |
+| Changed in two places: warn, pause sync, choose a version | **New** | today the newest `updatedAt` wins silently |
 | Cloud storage: used, total, free, and OSplit's share | **New** | provider quota API; OSplit's share is the sum of `RemoteProject.size` |
 | Export and import a project file (.osplit) | Existing | `export-project`, `import-project`; now in the ⋯ menu and the library header |
 
@@ -172,11 +173,24 @@ updates where behaviour changes, as earlier milestones did.
    - Per-project **Upload** (new, around `uploadProject()`) and
      **Download** (exists).
    - "Add to the cloud when done" in New split: upload once the split and
-     analysis finish, then the project syncs automatically.
+     analysis finish, even when "Sync automatically" is off (it is a one-off
+     upload); from then on the project syncs like any other.
    - "Remove from this device": delete the local copy; the project becomes
      cloud only.
-   - Sync states in the library: synced, changed (not synced yet), this
-     device only, cloud only, uploading, downloading.
+   - Sync states in the library: synced, changed (not synced yet), changed
+     in two places, this device only, cloud only, uploading, downloading.
+   - **Changed in two places.** Sync remembers, per project, the cloud
+     copy's `updatedAt` it last synced with (a new `syncedAt` stored on this
+     device, not uploaded). If both the local project and the cloud copy are
+     newer than that, `planSync()` puts the project in a new `conflicts`
+     list instead of uploading or downloading it. The library shows it with
+     a warning and **Resolve**, the sync line says "1 project needs you",
+     and sync skips it until the user chooses in the dialog:
+     - keep this device's version (upload, replacing the cloud copy);
+     - keep the cloud version (download, replacing the local copy);
+     - keep both (download the cloud version as a new project with
+       `asCopy()` from `src/project-file.ts`, named "… (other device)", and
+       upload the local one).
    - Settings: "Connected to Dropbox as …", Disconnect, cloud storage (used,
      total, free, OSplit's share), "Sync automatically", **Sync now** and the
      last sync time. Quota needs a new call per provider (Dropbox
@@ -215,15 +229,13 @@ Design these as part of the PR that needs them:
 - What Capo does: shows chord shapes for a capo position without changing the
   audio, like the "chords in the new key" switch?
 - Mix presets: fixed, or saved by the user?
-- Cloud: when "Sync automatically" is off, does "Add to the cloud when
-  done" still upload? (The mockups assume yes: it is a one-off upload.)
-- Cloud: a project changed on two devices before a sync. Today the newest
-  `updatedAt` wins; keep that, or warn?
 
 ---
 
 ## Tests
 
+- Unit: `planSync()` skips projects only on this device, and lists a
+  project changed on both sides as a conflict; each way of resolving it.
 - Unit: marker ordering, section ranges and the marker loop rule; markers
   after a downbeat shift or tempo ×2; one click state for the mixer and the
   rhythm controls; export file naming for a stem subset.
