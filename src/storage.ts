@@ -167,11 +167,22 @@ export function saveProject(project: Project): Promise<Project> {
     .then(() => updated);
 }
 
-export async function updateProjectTask(
+export function updateProjectTask(
   projectId: string,
   task:
     & Pick<Project, "status">
     & Partial<Pick<Project, "taskProgress" | "taskStage" | "errorMessage">>,
+): Promise<Project> {
+  return patchProject(projectId, task);
+}
+
+/**
+ * Changes some fields of the stored project in one transaction, keeping
+ * the rest as stored (a running task may be writing its progress).
+ */
+export async function patchProject(
+  projectId: string,
+  task: Partial<Omit<Project, "id">>,
 ): Promise<Project> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {

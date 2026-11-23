@@ -18,6 +18,7 @@ const PATHS = {
   device: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/>',
   cloud: '<path d="M17.5 19a4.5 4.5 0 1 0-1.3-8.8A6 6 0 0 0 4.4 12.6 3.5 3.5 0 0 0 6.5 19z"/>',
   more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
   music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
 } as const;
 

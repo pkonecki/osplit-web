@@ -70,6 +70,7 @@ test("asks before deleting a project, in an accessible dialog", async ({ page })
   await expect(card).toHaveCount(1);
 
   await card.click();
+  await expect(dialog).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(card).toHaveCount(1);
@@ -130,11 +131,6 @@ test("opens a file shared to the installed app", async ({ page }) => {
 test("removes the source after separation when asked; progress is accessible", async ({ page }) => {
   await openApp(page);
   await createProjectWithClip(page, "Space saver", clip);
-  await page.check('[data-action="delete-source-option"]');
-  await expect.poll(async () =>
-    (await readStore<{ deleteSourceAfterSeparation?: boolean }>(page, "projects"))[0]
-      .deleteSourceAfterSeparation
-  ).toBe(true);
   await page.evaluate(() => {
     const values: string[] = [];
     (window as unknown as { __aria: string[] }).__aria = values;
@@ -144,8 +140,14 @@ test("removes the source after separation when asked; progress is accessible", a
       if (value && values.at(-1) !== value) values.push(value);
     }).observe(document.body, { subtree: true, attributes: true, childList: true });
   });
-  await expect(page.locator('[role="progressbar"]')).toHaveAttribute("aria-valuemin", "0");
   await page.click('[data-action="separate"]');
+  // On the progress screen, while it runs.
+  await expect(page.locator('[role="progressbar"]')).toHaveAttribute("aria-valuemin", "0");
+  await page.getByRole("switch", { name: /Delete the original audio when done/ }).check();
+  await expect.poll(async () =>
+    (await readStore<{ deleteSourceAfterSeparation?: boolean }>(page, "projects"))[0]
+      .deleteSourceAfterSeparation
+  ).toBe(true);
   await expect(page.locator('[data-action="export-mix"]')).toBeVisible({
     timeout: SEPARATION_TIMEOUT,
   });

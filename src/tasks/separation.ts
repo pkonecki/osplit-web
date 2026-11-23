@@ -14,7 +14,7 @@ import type { InferenceRequest, InferenceResponse } from "../messages";
 import { requestRender, showMessage, state } from "../state";
 import { completeSeparation, getSource, updateProjectTask } from "../storage";
 import { type Project, projectModel, type Stem } from "../types";
-import { updateProgressDisplay } from "../view/detail";
+import { updateProgressDisplay } from "../view/progress-view";
 import { describeError, workerCrash } from "../view/format";
 import { analyzeProject, forgetAnalysis } from "./analysis";
 import { progressPersister } from "./progress";
@@ -45,16 +45,18 @@ export async function separateProject(project: Project): Promise<void> {
   state.progress = 0;
   state.progressLabel = "Preparing audio";
   state.provider = null;
+  state.taskProjectId = project.id;
+  state.taskStartedAt = Date.now();
   const persist = progressPersister(project.id);
   acquireWakeLock();
 
   try {
-    state.selectedProject = await updateProjectTask(project.id, {
+    keepSelected(await updateProjectTask(project.id, {
       status: "processing",
       errorMessage: null,
       taskProgress: 0,
       taskStage: "Preparing audio",
-    });
+    }));
     await requestRender();
     const samples = await decodeToStereo(source.blob);
     if (abortSeparation) {
@@ -121,28 +123,29 @@ export async function separateProject(project: Project): Promise<void> {
     });
 
     await persist.settled();
-    state.selectedProject = await completeSeparation(
+    const separated = await completeSeparation(
       project.id,
       result.stems,
       result.peaks,
     );
+    keepSelected(separated);
     state.progressLabel = "Separation complete";
     if (state.screenMessage === LONG_TRACK_WARNING) state.screenMessage = "";
     // New stems: find their beats (in the background; never fails the project).
     forgetAnalysis(project.id);
-    void analyzeProject(state.selectedProject);
+    void analyzeProject(separated);
   } catch (error) {
     const cancelled = error instanceof DOMException &&
       error.name === "AbortError";
     await persist.settled();
-    state.selectedProject = await updateProjectTask(project.id, {
+    keepSelected(await updateProjectTask(project.id, {
       status: cancelled ? "interrupted" : "failed",
       taskProgress: state.progress,
       taskStage: cancelled ? "Cancelled" : "Failed",
       errorMessage: cancelled
         ? "Processing was cancelled. Start again to retry."
         : describeError(error),
-    });
+    }));
     if (!cancelled) state.screenMessage = describeError(error);
   } finally {
     inferenceWorker?.terminate();
@@ -150,6 +153,7 @@ export async function separateProject(project: Project): Promise<void> {
     rejectInference = undefined;
     state.working = false;
     state.provider = null;
+    state.taskProjectId = null;
     releaseWakeLock();
     await requestRender();
   }
@@ -173,6 +177,14 @@ async function decodeToStereo(file: Blob): Promise<Float32Array> {
   return decoded.sampleRate === SAMPLE_RATE
     ? interleaveStereo(left, right)
     : resampleStereo(left, right, decoded.sampleRate);
+}
+
+/**
+ * Shows the task's latest copy of the project if it is the one open: the
+ * user may have gone to the library or another project meanwhile.
+ */
+function keepSelected(project: Project): void {
+  if (state.selectedProject?.id === project.id) state.selectedProject = project;
 }
 
 export function cancelSeparation(): void {

@@ -270,11 +270,9 @@ export async function recordProgress(page: Page): Promise<void> {
   await page.evaluate(() => {
     window.__progress = [];
     const record = () => {
-      const value = document.querySelector(".progress-copy span:last-child")
-        ?.textContent;
+      const value = document.querySelector("#progress-value")?.textContent;
       const label =
-        document.querySelector(".progress-copy span:first-child")
-          ?.textContent ?? "";
+        document.querySelector("#progress-stage")?.textContent ?? "";
       if (!value?.endsWith("%")) return;
       const number = Number(value.slice(0, -1));
       const last = window.__progress.at(-1);

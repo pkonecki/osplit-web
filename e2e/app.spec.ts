@@ -499,15 +499,13 @@ test("a second tab sees a separation running in the first", async ({ page, conte
   await openApp(page);
   await createProjectWithClip(page, "Two tabs", clip);
   await page.click('[data-action="separate"]');
-  await expect(page.locator(".progress-copy span").first()).toHaveText(
-    /Downloading|Loading|Separating/,
-  );
+  await expect(page.locator("#progress-stage")).toHaveText(/Getting|Separating/);
 
   const second = await context.newPage();
   await openApp(second);
-  const button = second.locator(".process-card .button.primary");
-  await expect(button).toHaveText("Processing in another tab…");
-  await expect(button).toBeDisabled();
+  await expect(second.locator("#progress-stage")).toHaveText("Splitting in another tab");
+  // Only the tab running it can cancel it.
+  await expect(second.locator('[data-action="cancel"]')).toHaveCount(0);
 
   await expect(page.locator('[data-action="export-mix"]')).toBeVisible({
     timeout: SEPARATION_TIMEOUT,

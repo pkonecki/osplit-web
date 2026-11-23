@@ -9,84 +9,80 @@ import {
   type Project,
   projectModel,
 } from "../types";
-import { escapeHtml, statusLabel } from "./format";
+import { escapeHtml } from "./format";
 import { renderMixer } from "./mixer";
+import { renderProgressView } from "./progress-view";
 import { footerMarkup, pageHeader } from "./shell";
 
 export function renderDetail(project: Project): string {
   const complete = project.completedStems.length > 0;
-  const model = projectModel(project);
   const gpu = knownGpu();
+  const model = projectModel(project);
   // Saved with Demucs, opened where it cannot run: the stems stay, but a new
   // separation needs Spleeter.
   const blocked = !modelAvailable(model, gpu);
+  // A split runs (in this tab, or in another that holds the project's lock).
+  const splitting = project.status === "processing" && !urlTaskActive();
+  const downloading = urlTaskActive() && state.selectedProject?.id === project.id;
+  // Another task of this tab, on another project.
+  const elsewhere = state.working && !downloading && state.taskProjectId !== project.id;
   const busy = state.working || project.status === "processing";
-  // Marked as processing but not by this tab: another tab holds its lock.
-  const elsewhere = !state.working && project.status === "processing";
   return `
     <main class="content detail">
       ${pageHeader(escapeHtml(project.name), {
     back: true,
-    subtitle: `Saved in this browser · ${escapeHtml(project.sourceName ?? "No audio source yet")}`,
+    subtitle: `${escapeHtml(project.sourceName ?? "No audio source yet")} · ${
+      model === "htdemucs-6s" ? "Demucs" : "Spleeter"
+    } · ${MODEL_STEMS[model].length} stems`,
     actions: `<button class="button subtle" data-action="export-project" data-id="${
       escapeHtml(project.id)
-    }" title="Save this project with its audio, stems and analysis, to open it in OSplit on another device">Export project file</button>`,
+    }" title="Save this project with its audio, stems and analysis, to open it in OSplit on another device" ${
+      splitting ? "disabled" : ""
+    }>Export project file</button>`,
   })}
       ${state.screenMessage ? messageMarkup(state.screenMessage) : ""}
+      ${
+    splitting ? renderProgressView(project) : `
       <section class="source-row">
         <button class="button secondary" data-action="import" ${
-    busy ? "disabled" : ""
-  }>Choose audio file</button>
+      busy ? "disabled" : ""
+    }>Choose audio file</button>
         <div class="url-input"><input id="media-url" type="url" inputmode="url" placeholder="https://… (best effort)" aria-label="Audio or video URL" /><button class="button secondary" data-action="download-url" ${
-    busy ? "disabled" : ""
-  }>Download URL</button></div>
-        ${
-    urlTaskActive()
-      ? `<button class="button outline" data-action="cancel">Cancel download</button>`
-      : ""
-  }
+      busy ? "disabled" : ""
+    }>Download URL</button></div>
+        ${downloading ? `<button class="button outline" data-action="cancel">Cancel download</button>` : ""}
       </section>
       <p class="hint">URL download runs entirely in your browser and works only when the provider permits browser access. YouTube and many sites block this; importing a local audio file is the reliable option.</p>
       ${renderModelPicker(project, gpu, busy)}
       ${
-    project.sourceName && project.sourceRemoved && !busy
-      ? `<section class="empty-card compact source-removed"><h3>Source audio removed</h3><p class="muted">It was deleted after separation to save space. Import it again to re-separate.</p></section>`
-      : project.sourceName
-      ? `<section class="process-card">
-              <button class="button primary" data-action="${
-        busy ? "cancel" : "separate"
-      }" ${elsewhere || (blocked && !busy) ? "disabled" : ""}>${
-        urlTaskActive()
-          ? "Cancel download"
-          : elsewhere
-          ? "Processing in another tab…"
-          : busy
-          ? "Cancel processing"
-          : complete
-          ? "Separate again"
-          : project.status === "interrupted"
-          ? "Retry separation"
-          : `Separate ${STEM_COUNT_WORDS[MODEL_STEMS[model].length]} stems`
-      }</button>
-              <label class="check-row"><input type="checkbox" data-action="delete-source-option" ${
-        project.deleteSourceAfterSeparation ? "checked" : ""
-      } ${
-        busy ? "disabled" : ""
-      } /> Delete the source audio after separating <small class="muted">(saves space; re-separating needs the file again)</small></label>
-              <div class="progress-track" role="progressbar" aria-label="Separation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${
-        progressValue()
-      }" aria-valuetext="${
-        escapeHtml(progressText(project))
-      }"><span style="width:${progressValue()}%"></span></div>
-              <div class="progress-copy"><span>${
-        escapeHtml(state.progressLabel || statusLabel(project.status))
-      }</span><span>${busy ? `${state.progress}%` : ""}</span></div>
-              ${project.errorMessage ? messageMarkup(project.errorMessage) : ""}
+      project.sourceName && project.sourceRemoved && !busy
+        ? `<section class="empty-card compact source-removed"><h3>Source audio removed</h3><p class="muted">It was deleted after separation to save space. Import it again to re-separate.</p></section>`
+        : project.sourceName && !downloading
+        ? `<section class="process-card">
+              ${statusMarkup(project)}
+              <button class="button primary" data-action="separate" ${
+          busy || blocked ? "disabled" : ""
+        }>${
+          elsewhere
+            ? "Another split is running…"
+            : complete
+            ? "Separate again"
+            : project.status === "interrupted" || project.status === "failed"
+            ? "Retry separation"
+            : `Separate ${STEM_COUNT_WORDS[MODEL_STEMS[model].length]} stems`
+        }</button>
             </section>`
-      : `<section class="empty-card compact"><h3>Add a source track</h3><p class="muted">Choose an audio file from this device to enable separation.</p></section>`
+        : downloading
+        ? ""
+        : `<section class="empty-card compact"><h3>Add a source track</h3><p class="muted">Choose an audio file from this device to enable separation.</p></section>`
+    }`
   }
-      ${complete ? renderMixer(project) : ""}
-      <p class="notice">The browser may suspend processing when this tab is in the background. Task status is saved, but work is not guaranteed to continue after the tab is closed.</p>
+      ${complete && !splitting ? renderMixer(project) : ""}
+      ${
+    splitting
+      ? ""
+      : `<p class="notice">The browser may suspend processing when this tab is in the background. Task status is saved, but work is not guaranteed to continue after the tab is closed.</p>`
+  }
       ${footerMarkup()}
     </main>
     ${fileInputMarkup()}
@@ -154,28 +150,14 @@ export function messageMarkup(message: string): string {
   }</span><button data-action="dismiss" aria-label="Dismiss">×</button></div>`;
 }
 
-function progressValue(): number {
-  return Math.round(Math.max(0, Math.min(100, state.progress)));
-}
-
-function progressText(project?: Project): string {
-  const stage = state.progressLabel ||
-    (project ? statusLabel(project.status) : "");
-  return `${stage} · ${progressValue()}%`;
-}
-
-export function updateProgressDisplay(): void {
-  const track = document.querySelector<HTMLElement>(".progress-track");
-  track?.setAttribute("aria-valuenow", String(progressValue()));
-  track?.setAttribute("aria-valuetext", progressText());
-  const bar = document.querySelector<HTMLElement>(".progress-track span");
-  const stage = document.querySelector<HTMLElement>(
-    ".progress-copy span:first-child",
-  );
-  const value = document.querySelector<HTMLElement>(
-    ".progress-copy span:last-child",
-  );
-  if (bar) bar.style.width = `${state.progress}%`;
-  if (stage) stage.textContent = state.progressLabel;
-  if (value) value.textContent = `${state.progress}%`;
+/** Why the last split stopped, above the button that starts it again. */
+function statusMarkup(project: Project): string {
+  if (project.status !== "interrupted" && project.status !== "failed") return "";
+  const progress = Math.round(project.taskProgress ?? 0);
+  return `<div class="split-stopped ${project.status}">
+      <strong>${project.status === "failed" ? "The split failed" : "Split stopped"}${
+    progress > 0 ? ` at ${progress}%` : ""
+  }</strong>
+      <span>${escapeHtml(project.errorMessage ?? "Start it again to finish it.")}</span>
+    </div>`;
 }

@@ -1,5 +1,6 @@
 import { appUrl } from "../paths";
 import { state } from "../state";
+import { urlTaskActive } from "../tasks/url-download";
 import { icon } from "./icons";
 
 /** The app's top-level pages. A project page is open when one is selected. */
@@ -16,7 +17,8 @@ export function currentRoute(): Route {
  * own header instead (see `mobileHeader`).
  */
 export function shellMarkup(route: Route, content: string): string {
-  const leaving = state.working ? 'aria-disabled="true"' : "";
+  // A link download needs its page; a split runs in the background.
+  const leaving = urlTaskActive() ? 'aria-disabled="true"' : "";
   const item = (
     name: "library" | "settings",
     action: string,
@@ -33,7 +35,7 @@ export function shellMarkup(route: Route, content: string): string {
       <nav class="rail" aria-label="Main">
         <span class="rail-logo" title="OSplit">${icon("logo", 22)}</span>
         ${item("library", "home", "Library", "library")}
-        <button class="rail-item" data-action="new-split" ${leaving}>${icon("plus")}<span>New split</span></button>
+        <button class="rail-item" data-action="new-split" ${state.working ? 'aria-disabled="true"' : ""}>${icon("plus")}<span>New split</span></button>
         <span class="rail-spacer"></span>
         ${item("settings", "settings", "Settings", "settings")}
       </nav>
@@ -56,7 +58,7 @@ export function pageHeader(
       ${
     options.back
       ? `<button class="icon-button mobile-only" data-action="home" aria-label="Back to library" ${
-        state.working ? "disabled" : ""
+        urlTaskActive() ? "disabled" : ""
       }>${icon("back", 22)}</button>`
       : ""
   }
