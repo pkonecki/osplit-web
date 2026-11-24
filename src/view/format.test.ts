@@ -21,6 +21,7 @@ describe("formatting helpers", () => {
     expect(formatBytes(1536)).toBe("2 KB");
     expect(formatBytes(1024 ** 2)).toBe("1.0 MB");
     expect(formatBytes(98.4 * 1024 ** 2)).toBe("98.4 MB");
+    expect(formatBytes(4097 * 1024 ** 2)).toBe("4.0 GB");
   });
 
   it("makes project names safe as file names", () => {

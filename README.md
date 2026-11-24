@@ -112,6 +112,15 @@ lossless FLAC, typically about half the size of WAV. Exports are FLAC by
 default, or WAV when chosen in the mixer, and are saved through the browser's
 download handling.
 
+## Settings
+
+**Settings** (the rail on desktop, the gear on a phone's library) shows the
+browser storage OSplit uses, split into projects and models; the separation
+models, each downloaded or not, to download ahead of time (for example
+before going offline) or delete to free space (it downloads again the next
+time you split with it); whether WebGPU is available; and the link
+downloader's update check.
+
 ## Moving projects between devices
 
 **Export project file** (on a project page, or *Export* in the project list)
