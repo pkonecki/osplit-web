@@ -1,5 +1,6 @@
 import type { ChordSegment, MusicalKey } from "../types";
 import { type BeatGrid, barStartIndex, beatTime } from "./grid";
+import { chartBars } from "./chart";
 import { chordName, pitchClass, pitchName } from "./spelling";
 
 /**
@@ -62,21 +63,38 @@ export function barChords(
   return bars;
 }
 
-/** A plain-text chord sheet: a short header, then `| Am  | F   | C   | G   |` lines. */
+/**
+ * A plain-text chord sheet: a short header, then `| Am  | F   | C   | G   |`
+ * lines. With markers, each heads its bars as `[Chorus]`, its lines
+ * starting afresh.
+ */
 export function chordSheet(
   chords: ChordSegment[],
   grid: BeatGrid | null,
   duration: number,
   naming: ChordNaming,
   header: string[],
+  markers: readonly { bar: number; name: string }[] = [],
 ): string {
   const lines = [...header, ""];
   if (grid) {
-    const bars = barChords(chords, grid, duration, naming);
-    for (let i = 0; i < bars.length; i += BARS_PER_LINE) {
-      const cells = bars.slice(i, i + BARS_PER_LINE).map((bar) => ` ${bar.padEnd(CELL_WIDTH)}`);
-      lines.push(`|${cells.join("|")}|`);
+    const bars = chartBars(chords, grid, duration, naming);
+    let line: string[] = [];
+    const flush = () => {
+      if (line.length) lines.push(`|${line.map((bar) => ` ${bar.padEnd(CELL_WIDTH)}`).join("|")}|`);
+      line = [];
+    };
+    for (const bar of bars) {
+      const marker = markers.find((item) => item.bar === bar.number);
+      if (marker) {
+        flush();
+        if (lines[lines.length - 1] !== "") lines.push("");
+        lines.push(`[${marker.name}]`);
+      }
+      line.push(bar.chords.join(" "));
+      if (line.length === BARS_PER_LINE) flush();
     }
+    flush();
   } else {
     // No beat grid: one chord a line, with its time.
     for (const chord of chords) {

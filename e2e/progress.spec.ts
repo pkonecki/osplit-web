@@ -49,7 +49,8 @@ test("the library shows a split running in the background", async ({ page }) => 
   await expect(page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "New split" }))
     .toHaveAttribute("aria-disabled", "true");
   // The project can't be deleted while it is split.
-  await row.getByRole("button", { name: "Delete Background" }).click();
+  await row.getByRole("button", { name: "More actions for Background" }).click();
+  await page.getByRole("menuitem", { name: "Delete" }).click();
   await expect(page.locator(".message span")).toContainText("Cancel the split first");
 
   await row.getByRole("button", { name: "Open Background" }).click();

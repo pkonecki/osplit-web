@@ -229,8 +229,9 @@ async function projectRow(project: Project): Promise<string> {
       </span>
       <span class="project-actions">
         ${action}
-        <button class="button text-button" data-action="export-project" data-id="${id}" aria-label="Export ${name} as a project file">Export</button>
-        <button class="button danger-quiet" data-action="delete" data-id="${id}" aria-label="Delete ${name}">Delete</button>
+        <button class="icon-button row-menu" data-action="project-menu" data-id="${id}" aria-haspopup="menu" aria-expanded="false" aria-label="More actions for ${name}">${
+    icon("more", 20)
+  }</button>
       </span>
     </article>
   `;

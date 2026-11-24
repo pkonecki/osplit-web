@@ -222,10 +222,17 @@ and repeat an A–B loop. Speed, key and loop are saved with each project.
 - **Mixer:** a volume, mute and solo for each stem and, once the beats are
   known, the click. *Full mix*, *No vocals* and *Drums + bass* set the mutes
   and volumes in one go; any change after that makes the mix custom.
-- **Export:** the Export panel exports the mix, one stem, all stems (zip) or
-  the chords. With *With speed, key & loop* on, the exported mix (alone or in
-  the zip) uses the project's speed and key, and covers only the loop when it
-  is on. Stem exports are never changed.
+- **Export:** the Export panel (the header's **Export**, or the Export tab
+  on a phone) exports **Stems** (tick any of them, and the click: one file,
+  or a zip named after them, `<name>-stems.zip` with every stem), the **Mix**
+  of what you hear, or the **Chords** as a text chart with bar lines and the
+  markers as `[Section]` headings (plus a `.lab` file for DAWs), in FLAC or
+  WAV. With *Apply speed, key and loop* on, the mix uses the project's speed
+  and key, and covers only the loop when it is on. Stem exports are never
+  changed.
+- **Project menu:** ⋯ on a project, or on its row in the library: rename,
+  save as a project file, export, split again (another model or new audio),
+  and delete (after a confirmation).
 
 Key and speed changes go through a pitch shifter,
 [Signalsmith Stretch](https://signalsmith-audio.co.uk/code/stretch/) (MIT),
@@ -278,10 +285,10 @@ off still work.
   *Show chords in the new key*; off, the chords keep their original names.
 - **Chords now:** beside the chips, the chord at the playhead, large, and the
   next three.
-- **Export:** *Chord chart (.txt)* writes a chord sheet, four bars a line
-  (`| Am    | F     | C     | G     |`), named as shown. *.lab file* writes
-  `start end label` lines (MIREX format, such as `A:min`) for DAWs and
-  analysis tools.
+- **Export:** the chord chart (.txt) has four bars a line
+  (`| Am    | F     | C     | G     |`), named as shown, with each marker's
+  bars under `[Its name]`. The `.lab` file has `start end label` lines
+  (MIREX format, such as `A:min`) for DAWs and analysis tools.
 
 Accuracy: chords are simplified to major and minor triads (with inversions
 such as C/E when the bass makes them clear); sevenths, suspended and

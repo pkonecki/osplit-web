@@ -1,4 +1,4 @@
-import { exportAll, exportChords, exportMix, exportStem, setExportAppliesPractice, setExportFormat } from "./export";
+import { chordSheetText, exportChords, exportMix, exportStems, setExportAppliesPractice, setExportFormat } from "./export";
 import { stepBar } from "./analysis/chart";
 import { barLoop, MAX_BPM_FACTOR, MIN_BPM_FACTOR, tapTempo } from "./analysis/grid";
 import { keyName } from "./analysis/spelling";
@@ -58,7 +58,16 @@ import {
 } from "./view/chart";
 import { chordNaming, keyText, parseKey, songKey, updateChordNow } from "./view/harmony";
 import { stemRowsMarkup, updateMixer } from "./view/mixer";
-import { isPanelName, openPanel, setPanel, updatePanels } from "./view/panels";
+import {
+  exportChoice,
+  isPanelName,
+  openPanel,
+  setChordPreview,
+  setExportWhat,
+  setPanel,
+  toggleExportTrack,
+  updatePanels,
+} from "./view/panels";
 import { updatePlayerDisplay, updateScrubLoop } from "./view/player-bar";
 import { setPracticeTab, toggleMixerPanel } from "./view/practice-view";
 import { loadSongPeaks } from "./view/song-peaks";
@@ -391,16 +400,26 @@ function stepMarkers(current: Project, direction: -1 | 1): void {
   if (marker) jumpToMarker(current, marker.bar);
 }
 
-/** Downloads the chord chart (txt) or .lab file, named as the page shows them. */
-function exportProjectChords(current: Project, format: string | undefined): void {
+/** How the chord chart names the key: as heard, or unclear. */
+function keyLineFor(current: Project): string {
   const naming = chordNaming(current);
   const key = songKey(cachedAnalysis(current.id));
-  const keyLine = key
+  return key
     ? keyText(key, naming.semitones)
     : naming.key
     ? `unclear (perhaps ${keyName(naming.key)})`
     : "unknown";
-  exportChords(current, format === "lab" ? "lab" : "txt", naming, keyLine);
+}
+
+/** Downloads the chord chart (txt) or .lab file, named as the page shows them. */
+function exportProjectChords(current: Project, format: string | undefined): void {
+  exportChords(current, format === "lab" ? "lab" : "txt", chordNaming(current), keyLineFor(current));
+}
+
+/** The first lines of the chord chart, in the Export panel. */
+function updateChordPreview(current: Project): void {
+  const lines = chordSheetText(current, chordNaming(current), keyLineFor(current)).split("\n");
+  setChordPreview(lines.slice(0, 14).join("\n") + (lines.length > 15 ? "\n…" : ""));
 }
 
 /** Handles a click on a practice control; false if the action isn't one. */
@@ -418,6 +437,7 @@ export async function handlePracticeClick(
       if (opening && name === "marker") prepareMarkerPanel();
       setPanel(opening ? name : null);
       if (opening && name === "marker") document.querySelector<HTMLElement>("#marker-name")?.focus();
+      if (opening && name === "export" && project()) updateChordPreview(project()!);
       return true;
     }
     case "panel-close":
@@ -524,15 +544,30 @@ export async function handlePracticeClick(
       if (preset) await saveMix(applyMixPreset(current, preset));
       return true;
     }
-    case "export-stem":
-      if (button.dataset.stem) await exportStem(current, button.dataset.stem as Track);
+    case "export-what":
+      setExportWhat(button.dataset.what);
+      if (button.dataset.what === "chords") updateChordPreview(current);
+      updatePanels(current);
       return true;
-    case "export-mix":
-      await exportMix(current);
+    case "export-pick":
+      toggleExportTrack(current, (button.dataset.stem ?? null) as Track | null);
+      updatePanels(current);
       return true;
-    case "export-all":
-      await exportAll(current);
+    case "export-pick-all":
+      toggleExportTrack(current, null);
+      updatePanels(current);
       return true;
+    case "export-format":
+      setExportFormat(button.dataset.format === "wav" ? "wav" : "flac");
+      updatePanels(current);
+      return true;
+    case "export-run": {
+      const choice = exportChoice(current);
+      if (choice.what === "chords") exportProjectChords(current, "txt");
+      else if (choice.what === "mix") await exportMix(current);
+      else await exportStems(current, choice.tracks);
+      return true;
+    }
     case "export-chords":
       exportProjectChords(current, button.dataset.format);
       return true;
@@ -599,11 +634,9 @@ export async function handlePracticeChange(event: Event): Promise<boolean> {
   const target = event.target as HTMLInputElement;
   const current = project();
   switch (target.dataset.action) {
-    case "export-format":
-      setExportFormat(target.value === "wav" ? "wav" : "flac");
-      return true;
     case "export-practice":
       setExportAppliesPractice(target.checked);
+      if (current) updatePanels(current);
       return true;
   }
   if (!current) return false;

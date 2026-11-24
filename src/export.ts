@@ -1,3 +1,4 @@
+import { stemsZipName } from "./export-names";
 import {
   CHANNELS,
   SAMPLE_RATE,
@@ -124,12 +125,19 @@ export function exportChords(
     downloadBlob(new Blob([labFile(chords, naming)], { type: "text/plain" }), `${base}-chords.lab`);
     return;
   }
+  const text = chordSheetText(project, naming, keyLine);
+  downloadBlob(new Blob([text], { type: "text/plain;charset=utf-8" }), `${base}-chords.txt`);
+}
+
+/** The .txt chord chart of the project, as exported. */
+export function chordSheetText(project: Project, naming: ChordNaming, keyLine: string): string {
+  const record = cachedAnalysis(project.id);
+  const chords = record?.chords ?? [];
   const grid = projectGrid(project.id);
   const header = [project.name, `Key: ${keyLine}`];
   if (grid) header.push(`Tempo: ${formatTempo(grid.bpm, 1)} BPM, ${grid.beatsPerBar}/4`);
   header.push("Chords detected by OSplit (simplified to major and minor).");
-  const text = chordSheet(chords, grid, record.duration, naming, header);
-  downloadBlob(new Blob([text], { type: "text/plain;charset=utf-8" }), `${base}-chords.txt`);
+  return chordSheet(chords, grid, record?.duration ?? 0, naming, header, project.markers ?? []);
 }
 
 export async function exportStem(project: Project, stem: Track): Promise<void> {
@@ -159,29 +167,29 @@ export async function exportMix(project: Project): Promise<void> {
 }
 
 /**
- * Downloads one zip with every stem and the current mix, in the chosen
- * format. Stems already in that format go in as they are stored.
+ * Downloads the chosen stems (and the click), in the chosen format: one
+ * file for one stem, else a zip. Stems already in that format go in as
+ * they are stored.
  */
-export async function exportAll(project: Project): Promise<void> {
+export async function exportStems(project: Project, tracks: readonly Track[]): Promise<void> {
+  const picked = [...ALL_STEMS, "click" as const].filter((track) =>
+    tracks.includes(track) && (track === "click" || project.completedStems.includes(track))
+  );
+  if (!picked.length) throw new Error("Choose at least one stem to export.");
+  if (picked.length === 1) return exportStem(project, picked[0]);
   const format = exportFormat();
   const base = safeFileName(project.name);
   const entries: ZipEntry[] = [];
-  for (const stem of ALL_STEMS.filter((s) => project.completedStems.includes(s))) {
-    const stored = await getStem(project.id, stem);
-    if (!stored) throw new Error(`The ${STEM_LABELS[stem]} stem is missing.`);
-    entries.push({
-      name: `${base}-${stem}.${format}`,
-      data: await stemFile(stored.blob, format),
-    });
+  for (const track of picked) {
+    if (track === "click") {
+      entries.push({ name: `${base}-click.${format}`, data: await clickFile(project, format) });
+      continue;
+    }
+    const stored = await getStem(project.id, track);
+    if (!stored) throw new Error(`The ${STEM_LABELS[track]} stem is missing.`);
+    entries.push({ name: `${base}-${track}.${format}`, data: await stemFile(stored.blob, format) });
   }
-  if (projectGrid(project.id)) {
-    entries.push({ name: `${base}-click.${format}`, data: await clickFile(project, format) });
-  }
-  entries.push({
-    name: `${base}-${mixName(project)}.${format}`,
-    data: await mixFile(project, format),
-  });
-  downloadBlob(await createZip(entries), `${base}-stems.zip`);
+  downloadBlob(await createZip(entries), stemsZipName(base, picked, project.completedStems.length));
 }
 
 /** The project's beat grid, which the click export needs. */

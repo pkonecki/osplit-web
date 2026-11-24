@@ -20,7 +20,8 @@ import {
   type AnalysisRecord,
   DEFAULT_CLICK_VOLUME,
   type Project,
-  STEM_LABELS,
+  type Track,
+  TRACK_LABELS,
 } from "../types";
 import { escapeHtml, formatTime } from "./format";
 import { songKey } from "./harmony";
@@ -207,49 +208,157 @@ export function rhythmPanel(project: Project): string {
   );
 }
 
-export function exportPanel(project: Project): string {
-  const format = exportFormat();
-  const stems = ALL_STEMS.filter((stem) => project.completedStems.includes(stem));
+/** What the Export panel exports, and the stems picked (all by default). */
+type ExportWhat = "stems" | "mix" | "chords";
+let exportWhat: ExportWhat = "stems";
+let exportPicked: Set<Track> | null = null;
+let exportProjectId = "";
+
+export function exportChoice(project: Project): { what: ExportWhat; tracks: Track[] } {
+  return { what: exportWhat, tracks: pickedTracks(project) };
+}
+
+export function setExportWhat(what: string | undefined): void {
+  if (what === "stems" || what === "mix" || what === "chords") exportWhat = what;
+}
+
+function exportTracks(project: Project): Track[] {
+  const stems: Track[] = ALL_STEMS.filter((stem) => project.completedStems.includes(stem));
+  return projectGrid(project.id) ? [...stems, "click"] : stems;
+}
+
+function pickedTracks(project: Project): Track[] {
+  if (exportProjectId !== project.id || !exportPicked) {
+    exportProjectId = project.id;
+    exportPicked = new Set(ALL_STEMS.filter((stem) => project.completedStems.includes(stem)));
+  }
+  return exportTracks(project).filter((track) => exportPicked!.has(track));
+}
+
+/** Ticks or unticks a stem, or all of them (`track` null). */
+export function toggleExportTrack(project: Project, track: Track | null): void {
+  const picked = new Set(pickedTracks(project));
+  if (track === null) {
+    const all = exportTracks(project);
+    exportPicked = picked.size === all.length ? new Set() : new Set(all);
+  } else {
+    if (picked.has(track)) picked.delete(track);
+    else picked.add(track);
+    exportPicked = picked;
+  }
+}
+
+export function exportPanel(): string {
   return panel(
     "export",
     "Export",
     `
-      <div class="field-group">
-        <span class="box-label">Mix</span>
-        <button class="export-item" data-action="export-mix"><strong>What you hear</strong><small>The stems as mixed now, in one file</small></button>
-        <label class="switch-row compact export-practice" ${isNeutral(project) ? "hidden" : ""}>
-          <span><strong>With speed, key &amp; loop</strong><small>Applies the practice settings to the mix</small></span>
+      <div class="segmented export-what" role="group" aria-label="What to export">
+        <button data-action="export-what" data-what="stems" aria-pressed="false">Stems</button>
+        <button data-action="export-what" data-what="mix" aria-pressed="false">Mix</button>
+        <button data-action="export-what" data-what="chords" aria-pressed="false">Chords</button>
+      </div>
+      <div class="export-section" data-export="stems">
+        <div class="field-row"><strong>Stems</strong><button class="text-action" data-action="export-pick-all"></button></div>
+        <div class="stem-picks" id="stem-picks"></div>
+        <small class="muted" id="stems-note"></small>
+      </div>
+      <div class="export-section" data-export="mix">
+        <p class="panel-note">One audio file of what you hear now: the mixer levels, mutes and solos, and the click if it is on.</p>
+        <label class="switch-row compact export-practice">
+          <span><strong>Apply speed, key and loop</strong><small id="export-practice-note"></small></span>
           <input type="checkbox" role="switch" class="switch" data-action="export-practice" ${
       exportAppliesPractice() ? "checked" : ""
     } />
         </label>
       </div>
-      <div class="field-group">
-        <span class="box-label">Stems</span>
-        <div class="stem-export-grid">${
-      stems.map((stem) =>
-        `<button class="export-stem stem-${stem}" data-action="export-stem" data-stem="${stem}" aria-label="Export ${
-          STEM_LABELS[stem]
-        }">${STEM_LABELS[stem]}</button>`
-      ).join("")
-    }</div>
-        <button class="export-item" data-action="export-all"><strong>All stems</strong><small>${stems.length} files in a zip</small></button>
+      <div class="export-section" data-export="chords">
+        <p class="panel-note">A text chord chart with bar numbers and your markers as section headings, named as the chart shows them.</p>
+        <pre class="chord-preview" id="chord-preview"></pre>
+        <button class="text-action" data-action="export-chords" data-format="lab">Also as a .lab file (for DAWs)</button>
       </div>
-      <div class="field-group">
-        <span class="box-label">Chords</span>
-        <div class="ab-row">
-          <button class="button secondary" data-action="export-chords" data-format="txt">Chord chart (.txt)</button>
-          <button class="button secondary" data-action="export-chords" data-format="lab">.lab file</button>
+      <div class="field-row export-format-row" data-export-audio>
+        <span class="box-label">Format</span>
+        <div class="segmented" role="group" aria-label="Format">
+          <button data-action="export-format" data-format="flac" aria-pressed="false">FLAC</button>
+          <button data-action="export-format" data-format="wav" aria-pressed="false">WAV</button>
         </div>
       </div>
-      <div class="field-row">
-        <label for="export-format" class="box-label">Format</label>
-        <select id="export-format" class="export-format" data-action="export-format" aria-label="Export format">
-          <option value="flac" ${format === "flac" ? "selected" : ""}>FLAC · smaller, lossless</option>
-          <option value="wav" ${format === "wav" ? "selected" : ""}>WAV · most compatible</option>
-        </select>
-      </div>`,
+      <button class="button primary export-run" data-action="export-run"></button>
+      <small class="muted export-size" id="export-size"></small>`,
   );
+}
+
+/** Updates the Export panel in place. */
+function updateExport(project: Project): void {
+  const root = document.querySelector<HTMLElement>("#panel-export");
+  if (!root) return;
+  for (const button of root.querySelectorAll<HTMLElement>('[data-action="export-what"]')) {
+    const on = button.dataset.what === exportWhat;
+    button.setAttribute("aria-pressed", String(on));
+  }
+  for (const section of root.querySelectorAll<HTMLElement>("[data-export]")) {
+    section.hidden = section.dataset.export !== exportWhat;
+  }
+  const audio = root.querySelector<HTMLElement>("[data-export-audio]");
+  if (audio) audio.hidden = exportWhat === "chords";
+  const format = exportFormat();
+  for (const button of root.querySelectorAll<HTMLElement>('[data-action="export-format"]')) {
+    button.setAttribute("aria-pressed", String(button.dataset.format === format));
+  }
+  const all = exportTracks(project);
+  const picked = pickedTracks(project);
+  const picks = root.querySelector<HTMLElement>("#stem-picks");
+  if (picks) {
+    const html = all.map((track) => {
+      const on = picked.includes(track);
+      return `<button class="stem-pick stem-${track}" role="checkbox" aria-checked="${on}" data-action="export-pick" data-stem="${track}"><span class="pick-box" aria-hidden="true"></span><span class="stem-dot" aria-hidden="true"></span>${TRACK_LABELS[track]}</button>`;
+    }).join("");
+    if (picks.innerHTML !== html) picks.innerHTML = html;
+  }
+  setText('[data-action="export-pick-all"]', picked.length === all.length ? "Clear all" : "Select all");
+  setText("#stems-note", picked.length > 1 ? "Several stems download as one zip file." : "One stem downloads as a single audio file.");
+  const speed = formatSpeed(projectSpeed(project));
+  const semitones = projectSemitones(project);
+  const practice = document.querySelector<HTMLInputElement>('[data-action="export-practice"]');
+  const neutral = isNeutral(project);
+  setText("#export-practice-note", neutral
+    ? "Nothing to apply: the speed and key are as recorded and there is no loop"
+    : exportAppliesPractice()
+    ? `${speed}, key ${formatSemitones(semitones)}${project.loop?.enabled ? ", only the looped part" : ""}`
+    : "Off: the whole song at the original speed and key");
+  if (practice) practice.disabled = neutral;
+  const label = exportWhat === "chords"
+    ? "Export chords · .txt"
+    : exportWhat === "mix"
+    ? `Export mix · ${format.toUpperCase()}`
+    : picked.length === 0
+    ? "Choose at least one stem"
+    : picked.length === 1
+    ? `Export 1 stem · ${format.toUpperCase()}`
+    : `Export ${picked.length} stems · zip`;
+  const run = root.querySelector<HTMLButtonElement>('[data-action="export-run"]');
+  if (run) {
+    run.textContent = label;
+    run.disabled = exportWhat === "stems" ? picked.length === 0 : exportWhat === "chords" ? !hasChords(project) : false;
+  }
+  const duration = cachedAnalysis(project.id)?.duration ?? 0;
+  // FLAC is about half the size of 16-bit WAV.
+  const perFile = (duration * 44_100 * 4 * (format === "flac" ? 0.55 : 1)) / 1_000_000;
+  setText("#export-size", exportWhat === "chords"
+    ? "Uses the chord names shown in the chart"
+    : duration
+    ? `About ${Math.max(1, Math.round(perFile * (exportWhat === "mix" ? 1 : Math.max(1, picked.length))))} MB`
+    : "");
+}
+
+function hasChords(project: Project): boolean {
+  return (cachedAnalysis(project.id)?.chords ?? []).some((chord) => chord.root !== null);
+}
+
+/** The chord preview: the first lines of the .txt chart. */
+export function setChordPreview(text: string): void {
+  setText("#chord-preview", text);
 }
 
 /** Updates every panel and chip for `project`, in place. */
@@ -331,9 +440,7 @@ export function updatePanels(project: Project): void {
   // Rhythm.
   updateRhythm(project, record, speed);
 
-  // Export.
-  const practice = document.querySelector<HTMLElement>(".export-practice");
-  if (practice) practice.hidden = isNeutral(project);
+  updateExport(project);
 }
 
 function keyGridMarkup(key: ReturnType<typeof songKey>, semitones: number): string {

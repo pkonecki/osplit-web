@@ -67,7 +67,9 @@ import {
 import { installWakeLock } from "./tasks/wake-lock";
 import { type ModelId, newProject, type Project } from "./types";
 import { renderDetail, setSetupOpen } from "./view/detail";
-import { choiceDialog, confirmDialog } from "./view/dialog";
+import { choiceDialog, confirmDialog, textDialog } from "./view/dialog";
+import { type MenuItem, openMenu } from "./view/menu";
+import { setPanel } from "./view/panels";
 import { captureForm, restoreForm } from "./view/form-state";
 import { describeError, escapeHtml, formatBytes } from "./view/format";
 import { applyLibraryFilter, library, renderProjects } from "./view/projects";
@@ -478,9 +480,11 @@ async function handleClick(event: Event): Promise<void> {
         state.screenMessage = "";
         await render();
         break;
-      case "project-menu":
-        if (state.selectedProject) await projectMenu(state.selectedProject);
+      case "project-menu": {
+        const projectId = id ?? state.selectedProject?.id;
+        if (projectId) await projectMenu(projectId, button);
         break;
+      }
       case "split-cancel":
         setSetupOpen(false);
         await render();
@@ -588,21 +592,52 @@ async function deleteWithConfirmation(id: string): Promise<void> {
 }
 
 /**
- * The project menu: export the project file, split again (the source and
- * model choices), or delete the project.
+ * A project's menu (⋯), on its page or in the library: open, rename, save
+ * as a project file, export, split again, delete.
  */
-async function projectMenu(project: Project): Promise<void> {
-  const choice = await choiceDialog(project.name, [
-    { value: "export", label: "Save as project file" },
-    { value: "split", label: "Split again…" },
-    { value: "delete", label: "Delete project" },
-  ]);
-  if (choice === "export") await exportProjectFile(project.id);
-  if (choice === "split") {
-    setSetupOpen(true);
-    await render();
+async function projectMenu(id: string, anchor: HTMLElement): Promise<void> {
+  const project = await getProject(id);
+  if (!project) throw new Error("That project no longer exists.");
+  const onPage = state.selectedProject?.id === id;
+  const ready = project.completedStems.length > 0 && project.status !== "processing";
+  const items: MenuItem[] = [];
+  if (!onPage) items.push({ value: "open", label: "Open" });
+  items.push({ value: "rename", label: "Rename" });
+  if (project.status !== "processing") {
+    items.push({ value: "file", label: "Save as project file", sub: "One .osplit file, to move it to another device" });
   }
-  if (choice === "delete") await deleteWithConfirmation(project.id);
+  if (onPage && ready) items.push({ value: "export", label: "Export…", sub: "Stems, mix or chords" });
+  if (onPage && ready) items.push({ value: "split", label: "Split again…", sub: "Another model, or new audio" });
+  items.push({ value: "delete", label: "Delete", danger: true });
+  const choice = await openMenu(anchor, project.name, items);
+  switch (choice) {
+    case "open":
+      await openProject(id);
+      break;
+    case "rename": {
+      const name = await textDialog("Rename project", "Name", project.name, 80);
+      if (!name) break;
+      const latest = await getProject(id);
+      if (!latest) break;
+      const renamed = await saveProject({ ...latest, name });
+      if (state.selectedProject?.id === id) state.selectedProject = renamed;
+      await render();
+      break;
+    }
+    case "file":
+      await exportProjectFile(id);
+      break;
+    case "export":
+      setPanel("export");
+      break;
+    case "split":
+      setSetupOpen(true);
+      await render();
+      break;
+    case "delete":
+      await deleteWithConfirmation(id);
+      break;
+  }
 }
 
 async function handleFileChange(event: Event): Promise<void> {
