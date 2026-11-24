@@ -26,6 +26,14 @@ test("phone: chart and mixer tabs, sheets from the bottom", async ({ page }) => 
   await expect(mixer).toBeVisible();
   await expect(chart).toBeHidden();
   await expect(tabs.getByRole("button", { name: "Mixer" })).toHaveAttribute("aria-current", "page");
+  // The mixer takes the width of the screen, under the header.
+  const mixerBox = (await mixer.boundingBox())!;
+  expect(mixerBox.width).toBeGreaterThan(350);
+  const headerBox = (await page.locator(".practice-header").boundingBox())!;
+  expect(mixerBox.y).toBeGreaterThanOrEqual(headerBox.y + headerBox.height - 1);
+  const solo = mixer.locator('[data-action="solo"][data-stem="vocals"]');
+  const soloBox = (await solo.boundingBox())!;
+  expect(soloBox.x + soloBox.width).toBeLessThanOrEqual(390);
   await tabs.getByRole("button", { name: "Chords" }).click();
   await expect(chart).toBeVisible();
 

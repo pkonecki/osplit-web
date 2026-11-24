@@ -734,7 +734,10 @@ button.info-chip:hover { color: var(--text); }
   .practice[data-tab="mixer"] .practice-main .practice-toolbar, .practice[data-tab="mixer"] .chord-chart { display: none; }
   .mixer-panel { display: none; flex: 1; border-left: 0; background: transparent; padding: var(--space-3) var(--space-4); }
   .practice[data-tab="mixer"] .mixer-panel { display: flex; }
+  /* One column: the header above the chart, or above the mixer. */
+  .practice { flex-direction: column; }
   .practice[data-tab="mixer"] .practice-main { flex: 0 0 auto; }
+  .practice[data-tab="mixer"] .mixer-panel { min-height: 0; }
   .player { z-index: auto; gap: 6px; padding: 10px var(--space-4) var(--space-2); border-radius: 20px 20px 0 0; }
   .transport-row { justify-content: center; }
   .player-where { flex-basis: 100%; justify-content: center; font-size: 12px; min-height: 16px; }
