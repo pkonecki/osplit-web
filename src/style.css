@@ -573,6 +573,16 @@ button.info-chip:hover { color: var(--text); }
 .bar-cell.current { border-color: var(--accent); background: var(--accent-tint); }
 .bar-cell.current .bar-chord { color: var(--accent); }
 .bar-cell.current .bar-peaks span { background: rgba(183, 243, 107, .28); }
+/* Bars inside the loop: a lime band along the bottom, the loop's ends marked. */
+.bar-cell.in-loop { background: rgba(183, 243, 107, .08); border-color: rgba(183, 243, 107, .45); }
+.bar-cell.in-loop::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: var(--accent); pointer-events: none; }
+.bar-cell.in-loop.loop-start { box-shadow: inset 3px 0 0 var(--accent); }
+.bar-cell.in-loop.loop-end { box-shadow: inset -3px 0 0 var(--accent); }
+.bar-cell.in-loop.loop-start.loop-end { box-shadow: inset 3px 0 0 var(--accent), inset -3px 0 0 var(--accent); }
+.bar-cell.in-loop.off { background: var(--surface-1); border-color: var(--line-4); }
+.bar-cell.in-loop.off::after { background: var(--text-3); opacity: .5; }
+.bar-cell.in-loop.off.loop-start, .bar-cell.in-loop.off.loop-end, .bar-cell.in-loop.off.loop-start.loop-end { box-shadow: none; }
+.bar-cell.in-loop.current { border-color: var(--accent); background: var(--accent-tint); }
 .bar-beats { position: absolute; left: 7px; right: 7px; bottom: 7px; display: flex; gap: 3px; }
 .bar-beats span { flex: 1; height: 3px; border-radius: 2px; background: rgba(183, 243, 107, .25); }
 .bar-beats span.on { background: var(--accent); }
