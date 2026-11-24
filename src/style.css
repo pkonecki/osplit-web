@@ -591,6 +591,8 @@ button.info-chip:hover { color: var(--text); }
 .segment-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: var(--space-1); }
 .chart-hint { margin: var(--space-3) 0 0 34px; color: var(--text-3); font-size: 12px; }
 .chart-hint .hint-touch { display: none; }
+/* Icons are never the click target: the button around them is. */
+svg.icon { pointer-events: none; }
 @media (hover: none) {
   .chart-hint .hint-mouse { display: none; }
   .chart-hint .hint-touch { display: inline; }

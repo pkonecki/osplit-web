@@ -337,6 +337,8 @@ test("mixer extras: solo, presets, shortcuts, peaks, media session and zip", asy
     .toHaveAttribute("aria-pressed", "true");
   await page.click('[data-action="mute"][data-stem="drums"]');
   await expect(page.locator('[data-action="mix-preset"][aria-pressed="true"]')).toHaveCount(0);
+  await page.click('[data-action="mix-preset"][data-preset="no-bass"]');
+  expect(await gains()).toEqual([1, 1, 1, 0, 1]);
   await page.click('[data-action="mix-preset"][data-preset="full"]');
   expect(await gains()).toEqual([1, 1, 1, 1, 1]);
   expect((await readStore<{ soloStems: string[]; mutedStems: string[] }>(page, "projects"))[0])
@@ -348,6 +350,17 @@ test("mixer extras: solo, presets, shortcuts, peaks, media session and zip", asy
   await expect(page.locator('[data-action="play"]')).toHaveAttribute("aria-label", "Pause");
   await page.keyboard.press("Space");
   await expect(page.locator('[data-action="play"]')).toHaveAttribute("aria-label", "Play");
+  // Space on a button just clicked plays too; it doesn't press the button again.
+  const muteVocals = page.locator('[data-action="mute"][data-stem="vocals"]');
+  await muteVocals.click();
+  await expect(muteVocals).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Space");
+  await expect(page.locator('[data-action="play"]')).toHaveAttribute("aria-label", "Pause");
+  await expect(muteVocals).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Space");
+  await expect(page.locator('[data-action="play"]')).toHaveAttribute("aria-label", "Play");
+  await muteVocals.click();
+  await expect(muteVocals).toHaveAttribute("aria-pressed", "false");
   const seekBar = page.locator("#seek-bar");
   await page.keyboard.press("Home");
   await expect.poll(async () => Number(await seekBar.inputValue())).toBe(0);

@@ -1,3 +1,4 @@
+import { setHtml } from "./dom";
 import { chordIndexAt, type ChordNaming, nameChord } from "../analysis/chord-sheet";
 import { KEY_UNCLEAR } from "../analysis/key";
 import { keyName, transposeKey } from "../analysis/spelling";
@@ -77,7 +78,7 @@ export function updateChordNow(project: Project): void {
   }
   const html = next.map((name, i) => `<span class="next-${i}">${name}</span>`).join("");
   const holder = document.querySelector<HTMLElement>("#chord-next");
-  if (holder && holder.innerHTML !== html) holder.innerHTML = html;
+  if (holder) setHtml(holder, html);
 }
 
 /** The next sounding chord after `index` (skipping "no chord"). */
