@@ -112,7 +112,10 @@
 
 body {
   min-width: 320px;
+  /* dvh: the visible height. On phones 100vh is the height with the
+     browser's toolbar hidden, so a 100vh page scrolls while it shows. */
   min-height: 100vh;
+  min-height: 100dvh;
   margin: 0;
   background: var(--bg);
 }
@@ -124,15 +127,16 @@ button:disabled, [aria-disabled="true"] { cursor: not-allowed; opacity: .48; }
 a { color: var(--accent); }
 .icon { flex: none; display: block; }
 
-#app { min-height: 100vh; display: flex; flex-direction: column; }
+#app { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
 
 /* Shell: the rail and the page beside it. */
-.shell { flex: 1; display: flex; min-height: 100vh; }
+.shell { flex: 1; display: flex; min-height: 100vh; min-height: 100dvh; }
 .rail {
   position: sticky;
   top: 0;
   flex: 0 0 var(--rail-width);
   height: 100vh;
+  height: 100dvh;
   padding: var(--space-4) 0;
   display: flex;
   flex-direction: column;
