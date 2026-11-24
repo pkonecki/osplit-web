@@ -64,6 +64,8 @@ export function updateChart(project: Project): void {
     project.loop ? `${project.loop.start}:${project.loop.end}:${project.loop.enabled}` : "",
   ].join("|");
   if (key === shownKey && chart.childElementCount) return;
+  // Not under a finger dragging a loop: it would lose the touch. Rebuilt after.
+  if (document.body.classList.contains("loop-drag") && chart.childElementCount) return;
   shownKey = key;
   currentIndex = -2;
   const chords = record?.chords ?? [];

@@ -778,7 +778,7 @@ let longPressed = false;
 const LOOP_PRESS_MS = 450;
 const LOOP_PRESS_SLOP = 10;
 let loopDrag: {
-  pointerId: number;
+  touchId: number;
   x: number;
   y: number;
   anchor: number;
@@ -786,6 +786,7 @@ let loopDrag: {
   active: boolean;
   timer: number;
   classes: Map<HTMLElement, string>;
+  release: () => void;
 } | null = null;
 
 function chartCells(): HTMLElement[] {
@@ -813,6 +814,7 @@ function endLoopDrag(save: boolean): void {
   if (!drag) return;
   loopDrag = null;
   clearTimeout(drag.timer);
+  drag.release();
   document.body.classList.remove("loop-drag");
   if (!drag.active) return;
   const current = project();
@@ -826,25 +828,76 @@ function endLoopDrag(save: boolean): void {
     void savePractice({ ...current, loop: { ...region, enabled: true } }).catch(console.warn);
     return;
   }
-  // Cancelled: put the chart back as it was.
+  // Cancelled: put the chart back as it was, or show what changed meanwhile.
   for (const [cell, className] of drag.classes) cell.className = className;
+  if (current) updateChart(current);
 }
 
+/**
+ * Driven by touch events rather than pointer events: when the browser won't
+ * let a touch's scrolling be blocked (a touch started while the page still
+ * glides from a swipe), it cancels the pointer but keeps sending touch moves,
+ * so the loop can still be dragged.
+ */
 function installLoopDrag(root: HTMLElement): void {
-  root.addEventListener("pointerdown", (event) => {
-    if (event.pointerType === "mouse" || loopDrag) return;
+  const cellAt = (x: number, y: number) =>
+    document.elementFromPoint(x, y)?.closest<HTMLElement>('#chord-chart .bar-cell[data-action="bar-seek"]') ?? null;
+  root.addEventListener("touchstart", (event) => {
+    if (loopDrag) return endLoopDrag(false);
+    const point = event.changedTouches[0];
     const cell = (event.target as HTMLElement).closest<HTMLElement>('#chord-chart .bar-cell[data-action="bar-seek"]');
-    if (!cell) return;
+    if (!cell || !point || event.touches.length > 1) return;
     const index = Number(cell.dataset.index);
     const drag = {
-      pointerId: event.pointerId,
-      x: event.clientX,
-      y: event.clientY,
+      touchId: point.identifier,
+      x: point.clientX,
+      y: point.clientY,
       anchor: index,
       last: index,
       active: false,
       timer: 0,
       classes: new Map(chartCells().map((c) => [c, c.className])),
+      release: () => {},
+    };
+    // Touch events stay with the cell touched even if the chart is rebuilt
+    // and it leaves the page, so the moves are followed there.
+    const move = (touchEvent: TouchEvent) => {
+      const touch = [...touchEvent.changedTouches].find((t) => t.identifier === drag.touchId);
+      if (loopDrag !== drag || !touch) return;
+      if (!drag.active) {
+        // Moving before the press is long enough is a scroll.
+        if (Math.hypot(touch.clientX - drag.x, touch.clientY - drag.y) > LOOP_PRESS_SLOP) endLoopDrag(false);
+        return;
+      }
+      // While dragging a loop, the finger doesn't scroll the page (when allowed).
+      if (touchEvent.cancelable) touchEvent.preventDefault();
+      const under = cellAt(touch.clientX, touch.clientY);
+      if (!under) return;
+      const at = Number(under.dataset.index);
+      if (at === drag.last) return;
+      drag.last = at;
+      showLoopDrag();
+    };
+    const end = (touchEvent: TouchEvent) => {
+      if (loopDrag !== drag) return;
+      if (![...touchEvent.changedTouches].some((t) => t.identifier === drag.touchId)) return;
+      if (touchEvent.type === "touchcancel") return endLoopDrag(false);
+      if (drag.active) {
+        // The click that ends the drag doesn't seek.
+        if (touchEvent.cancelable) touchEvent.preventDefault();
+        longPressed = true;
+        setTimeout(() => (longPressed = false), 400);
+      }
+      endLoopDrag(true);
+    };
+    const target = event.target as HTMLElement;
+    target.addEventListener("touchmove", move, { passive: false });
+    target.addEventListener("touchend", end);
+    target.addEventListener("touchcancel", end);
+    drag.release = () => {
+      target.removeEventListener("touchmove", move);
+      target.removeEventListener("touchend", end);
+      target.removeEventListener("touchcancel", end);
     };
     drag.timer = window.setTimeout(() => {
       drag.active = true;
@@ -853,39 +906,11 @@ function installLoopDrag(root: HTMLElement): void {
       showLoopDrag();
     }, LOOP_PRESS_MS);
     loopDrag = drag;
-  });
-  root.addEventListener("pointermove", (event) => {
-    const drag = loopDrag;
-    if (!drag || event.pointerId !== drag.pointerId) return;
-    if (!drag.active) {
-      // Moving before the press is long enough is a scroll.
-      if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > LOOP_PRESS_SLOP) endLoopDrag(false);
-      return;
-    }
-    const cell = document.elementFromPoint(event.clientX, event.clientY)
-      ?.closest<HTMLElement>('#chord-chart .bar-cell[data-action="bar-seek"]');
-    if (!cell) return;
-    const index = Number(cell.dataset.index);
-    if (index === drag.last) return;
-    drag.last = index;
-    showLoopDrag();
-  });
-  root.addEventListener("pointerup", (event) => {
-    const drag = loopDrag;
-    if (!drag || event.pointerId !== drag.pointerId) return;
-    // The click that ends the drag doesn't seek.
-    if (drag.active) {
-      longPressed = true;
-      setTimeout(() => (longPressed = false), 400);
-    }
-    endLoopDrag(true);
-  });
-  root.addEventListener("pointercancel", (event) => {
-    if (loopDrag && event.pointerId === loopDrag.pointerId) endLoopDrag(false);
-  });
-  // While dragging a loop, the finger doesn't scroll the page.
+  }, { passive: true });
+  // Registered up front: the browser lets a touch's moves block scrolling only
+  // if a listener that may block them was in place when the touch began.
   root.addEventListener("touchmove", (event) => {
-    if (loopDrag?.active) event.preventDefault();
+    if (loopDrag?.active && event.cancelable) event.preventDefault();
   }, { passive: false });
 }
 
