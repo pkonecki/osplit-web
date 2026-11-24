@@ -75,7 +75,8 @@ import { describeError, escapeHtml, formatBytes } from "./view/format";
 import { applyLibraryFilter, library, renderProjects } from "./view/projects";
 import { newSplitOpen, openNewSplit } from "./view/new-split";
 import { forgetOpened, LIBRARY_FILTERS, markOpened } from "./library";
-import { renderSettings } from "./view/settings";
+import { modelDownload, renderSettings, updateModelProgress } from "./view/settings";
+import { deleteModel, downloadModel } from "./model-cache";
 import { shellMarkup } from "./view/shell";
 import {
   handlePracticeChange,
@@ -473,6 +474,39 @@ async function handleClick(event: Event): Promise<void> {
           await withTaskLock(project.id, () => downloadFromUrl(project, url));
         }
         break;
+      case "model-download": {
+        const model = button.dataset.model as ModelId | undefined;
+        if (!model || state.working || modelDownload.model) break;
+        modelDownload.model = model;
+        modelDownload.progress = 0;
+        await render();
+        try {
+          await downloadModel(model, (fraction) => {
+            modelDownload.progress = fraction;
+            updateModelProgress();
+          });
+        } finally {
+          modelDownload.model = null;
+          await render();
+        }
+        break;
+      }
+      case "model-delete": {
+        const model = button.dataset.model as ModelId | undefined;
+        if (!model || state.working) break;
+        const name = model === "htdemucs-6s" ? "Demucs" : "Spleeter";
+        if (
+          await confirmDialog(
+            `Delete the ${name} model from this browser? It downloads again the next time you split with it.`,
+            "Delete model",
+          )
+        ) {
+          await deleteModel(model);
+          state.screenMessage = `Deleted the ${name} model.`;
+          await render();
+        }
+        break;
+      }
       case "yt-update":
         await checkYtDlpUpdate();
         break;
