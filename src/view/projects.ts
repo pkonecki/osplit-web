@@ -181,7 +181,9 @@ async function projectRow(project: Project): Promise<string> {
     : `${model === "htdemucs-6s" ? "Demucs" : "Spleeter"} · ${MODEL_STEMS[model].length} stems`;
   const progress = Math.round(project.taskProgress ?? 0);
   let status = STATUS_TEXT[kind];
-  if (kind === "busy") status = `Separating · ${progress}%`;
+  if (kind === "busy") {
+    status = `Separating · ${Math.round(state.taskProjectId === project.id ? state.progress : progress)}%`;
+  }
   if (kind === "interrupted" && progress > 0) status = `Interrupted at ${progress}%`;
   if (kind === "empty" && project.sourceName) status = "Not split yet";
   const source = project.sourceName ?? "No audio yet";
@@ -191,6 +193,8 @@ async function projectRow(project: Project): Promise<string> {
     ? `<button class="button small" data-action="resume" data-id="${id}" ${
       state.working || !project.sourceName || project.sourceRemoved ? "disabled" : ""
     } aria-label="Resume ${name}">${kind === "failed" ? "Retry" : "Resume"}</button>`
+    : kind === "busy"
+    ? `<button class="button small" data-action="open" data-id="${id}" aria-label="Open ${name}">Open</button>`
     : kind === "empty"
     ? `<button class="button small" data-action="open" data-id="${id}" aria-label="${
       project.sourceName ? "Split" : "Add audio to"
@@ -198,7 +202,7 @@ async function projectRow(project: Project): Promise<string> {
     : "";
   const search = `${project.name} ${project.sourceName ?? ""}`;
   return `
-    <article class="project-row kind-${kind}" data-kind="${kind}" data-search="${escapeHtml(search)}">
+    <article class="project-row kind-${kind}${state.taskProjectId === project.id ? " here" : ""}" data-kind="${kind}" data-search="${escapeHtml(search)}">
       <button class="project-open" data-action="open" data-id="${id}">
         <span class="project-thumb" aria-hidden="true">${
     extras.thumb.length
@@ -217,7 +221,9 @@ async function projectRow(project: Project): Promise<string> {
         <span class="status-text">${escapeHtml(status)}</span>
         ${
     kind === "busy" || (kind === "interrupted" && progress > 0)
-      ? `<span class="status-bar" aria-hidden="true"><span style="width:${progress}%"></span></span>`
+      ? `<span class="status-bar" aria-hidden="true"><span style="width:${
+        Math.round(state.taskProjectId === project.id ? state.progress : progress)
+      }%"></span></span>`
       : ""
   }
       </span>

@@ -71,6 +71,7 @@ import {
   deleteProject,
   getProject,
   listProjects,
+  patchProject,
   readProjectData,
   replaceSource,
   requestPersistentStorage,
@@ -439,32 +440,23 @@ async function handleClick(event: Event): Promise<void> {
         break;
       }
       case "home":
-        if (state.working) {
-          throw new Error(
-            "Wait for the current task or cancel it before leaving this project.",
-          );
-        }
-        await leaveProject("library");
-        break;
       case "settings":
-        if (state.working && state.selectedProject) {
-          throw new Error(
-            "Wait for the current task or cancel it before leaving this project.",
-          );
-        }
-        await leaveProject("settings");
-        break;
       case "new-split":
-        if (state.working && state.selectedProject) {
+        // A split keeps running in the background; a link download needs
+        // its page.
+        if (urlTaskActive()) {
           throw new Error(
-            "Wait for the current task or cancel it before leaving this project.",
+            "Wait for the download or cancel it before leaving this project.",
           );
         }
-        await leaveProject("library");
-        await newSplit();
+        await leaveProject(action === "settings" ? "settings" : "library");
+        if (action === "new-split") await newSplit();
         break;
       case "delete": {
         if (!id) break;
+        if ((state.working && state.taskProjectId === id) || (await getProject(id))?.status === "processing") {
+          throw new Error("This project is being split. Cancel the split first, then delete it.");
+        }
         const cloud = cloudConnection();
         let confirmed: boolean;
         let alsoCloud = false;
@@ -1235,8 +1227,8 @@ async function handleChange(event: Event): Promise<void> {
     return;
   }
   if (target.dataset.action === "delete-source-option" && state.selectedProject) {
-    state.selectedProject = await saveProject({
-      ...state.selectedProject,
+    // A split may be writing its progress meanwhile: change only this field.
+    state.selectedProject = await patchProject(state.selectedProject.id, {
       deleteSourceAfterSeparation: target.checked,
     });
     return;

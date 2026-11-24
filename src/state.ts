@@ -13,6 +13,9 @@ export const state = {
   screenMessage: "",
   /** True while this tab runs a separation, URL download or yt-dlp update. */
   working: false,
+  /** The project the running separation is for, and when it started (ms). */
+  taskProjectId: null as string | null,
+  taskStartedAt: 0,
   /** Where the running separation runs, once the worker reports it. */
   provider: null as "webgpu" | "wasm" | null,
   /** What the shared hidden file input was opened for. */
