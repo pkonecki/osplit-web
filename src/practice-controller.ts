@@ -362,6 +362,15 @@ function jumpToMarker(current: Project, bar: number): void {
   const start = shownBars().find((item) => item.number === bar)?.start;
   const marker = (current.markers ?? []).find((item) => item.bar === bar);
   seekTo(start ?? marker?.time ?? 0);
+  scrollToSection(bar);
+}
+
+/** Scrolls the chord chart so a marker's heading is at its top. */
+function scrollToSection(bar: number): void {
+  const chart = document.querySelector<HTMLElement>("#chord-chart");
+  const head = chart?.querySelector<HTMLElement>(`.section-head[data-marker-bar="${bar}"]`);
+  if (!chart || !head) return;
+  chart.scrollTop += head.getBoundingClientRect().top - chart.getBoundingClientRect().top - 4;
 }
 
 /** Saves the marker the Add marker panel describes. */
@@ -718,11 +727,12 @@ export async function handlePracticeKey(event: KeyboardEvent): Promise<void> {
   const target = event.target as HTMLElement;
   if (target.closest("input, select, textarea, [contenteditable], dialog")) return;
   if (!playerTime().ready) return;
-  const onButton = target.closest("button") !== null;
   switch (event.key) {
     case " ":
-      if (onButton) return;
+      // Space plays and pauses, even on a button just clicked (which would
+      // otherwise click it again); Enter still presses a focused button.
       event.preventDefault();
+      if (event.repeat) break;
       await togglePlay(!isPlaying());
       break;
     case "ArrowLeft":
@@ -881,6 +891,12 @@ function installLoopDrag(root: HTMLElement): void {
 
 export function installPracticeListeners(root: HTMLElement): void {
   installLoopDrag(root);
+  // Firefox presses a focused button when Space is released: Space is play.
+  document.addEventListener("keyup", (event) => {
+    const target = event.target as HTMLElement;
+    if (event.key !== " " || !project() || !playerTime().ready) return;
+    if (target.closest("button") && !target.closest("dialog")) event.preventDefault();
+  });
   root.addEventListener("pointerdown", (event) => {
     const markerElement = (event.target as HTMLElement).closest<HTMLElement>("[data-marker-bar]");
     if (markerElement && event.pointerType !== "mouse") {

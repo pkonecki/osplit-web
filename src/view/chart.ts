@@ -24,6 +24,8 @@ let bars: ChartBar[] = [];
 let segments: ChordSegment[] = [];
 let shownKey = "";
 let currentIndex = -2;
+/** Whether it was playing at the last playhead update, to scroll when playback starts. */
+let wasPlaying = false;
 
 export function chartMarkup(): string {
   return `<section class="chord-chart" id="chord-chart" aria-label="Chord chart" tabindex="-1"></section>`;
@@ -260,6 +262,8 @@ export function updateChartPlayhead(projectId?: string): void {
   const chart = document.querySelector<HTMLElement>("#chord-chart");
   if (!chart) return;
   const { position, playing } = playerTime();
+  const started = playing && !wasPlaying;
+  wasPlaying = playing;
   if (bars.length) {
     const index = barIndexAt(bars, position);
     const cells = chart.querySelectorAll<HTMLElement>(".bar-cell");
@@ -275,6 +279,8 @@ export function updateChartPlayhead(projectId?: string): void {
         cell.setAttribute("aria-current", "true");
         if (playing) cell.scrollIntoView({ block: "nearest" });
       }
+    } else if (started) {
+      cells[index]?.scrollIntoView({ block: "nearest" });
     }
     const cell = cells[index];
     const grid = projectId ? projectGrid(projectId) : null;
@@ -298,6 +304,8 @@ export function updateChartPlayhead(projectId?: string): void {
       currentIndex = index;
       cells[index]?.classList.add("current");
       if (playing) cells[index]?.scrollIntoView({ block: "nearest" });
+    } else if (started) {
+      chart.querySelectorAll<HTMLElement>(".bar-cell")[index]?.scrollIntoView({ block: "nearest" });
     }
   }
 }
@@ -306,4 +314,5 @@ export function updateChartPlayhead(projectId?: string): void {
 export function resetChart(): void {
   shownKey = "";
   currentIndex = -2;
+  wasPlaying = false;
 }

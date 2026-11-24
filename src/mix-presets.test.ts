@@ -21,6 +21,9 @@ describe("mix presets", () => {
     expect(applied.soloStems).toEqual(["click"]);
     expect(activeMixPreset(applied)?.id).toBe("drums-bass");
     expect(activeMixPreset(applyMixPreset(project, preset("no-vocals")))?.id).toBe("no-vocals");
+    const noBass = applyMixPreset(project, preset("no-bass"));
+    expect(noBass.mutedStems).toEqual(["bass"]);
+    expect(activeMixPreset(noBass)?.id).toBe("no-bass");
   });
 
   it("becomes custom after any change", () => {

@@ -1,16 +1,20 @@
 import { expect, type Page, test } from "@playwright/test";
-import { openPanel, readStore, separateClip, openApp, writeTestClip, closePanel } from "./helpers";
+import { closePanel, openApp, openPanel, readStore, seekTo, separateClip, writeTestClip } from "./helpers";
 
 // Markers: add at the playhead (M), headings in the chart, the list or
 // strip, jumping and section loops, rename and delete, and following the
 // grid when it changes.
 
 let clip: string;
+let longClip: string;
 
 test.beforeAll(({}, testInfo) => {
   clip = testInfo.outputPath("song.wav");
   // C, G, Am, F at 120 BPM (2 s a bar) over drums: 8 bars.
   writeTestClip(clip, 16, 120, { chords: true });
+  // 40 bars: more than a phone shows at once.
+  longClip = testInfo.outputPath("long-song.wav");
+  writeTestClip(longClip, 80, 120, { chords: true });
 });
 
 interface SavedProject {
@@ -124,4 +128,45 @@ test("phone: the marker strip and a long press on a heading", async ({ page }) =
   await page.getByRole("button", { name: "Delete" }).click();
   await expect(page.locator(".section-head")).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test("phone: jumping to a marker or starting playback scrolls the chart there", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openApp(page);
+  await separateClip(page, "Long song", longClip);
+  const chart = page.locator("#chord-chart");
+  const cells = page.locator(".bar-cell");
+  await expect(cells.nth(30)).toBeAttached({ timeout: 60_000 });
+  const inView = async (locator: ReturnType<Page["locator"]>) => {
+    const box = (await locator.boundingBox())!;
+    const area = (await chart.boundingBox())!;
+    return box.y >= area.y - 1 && box.y + box.height <= area.y + area.height + 1;
+  };
+
+  // A marker far down the song.
+  await cells.nth(32).scrollIntoViewIfNeeded();
+  await cells.nth(32).click();
+  await page.getByRole("button", { name: "Add marker" }).click();
+  const sheet = page.locator("#panel-marker");
+  await sheet.getByRole("button", { name: "Outro" }).click();
+  await sheet.getByRole("button", { name: "Save" }).click();
+  await expect(sheet).toBeHidden();
+  const head = page.locator(".section-head").first();
+
+  // From the top of the chart, the strip's marker scrolls to its heading.
+  await chart.evaluate((element) => (element.scrollTop = 0));
+  expect(await inView(head)).toBe(false);
+  await page.getByRole("navigation", { name: "Markers" }).getByRole("button", { name: "Jump to Outro" }).click();
+  await expect.poll(() => inView(head)).toBe(true);
+
+  // Paused far down with the chart at the top: Play scrolls to the bar playing.
+  await seekTo(page, 70);
+  await chart.evaluate((element) => (element.scrollTop = 0));
+  const current = page.locator(".bar-cell.current");
+  await expect(current).toHaveCount(1);
+  expect(await inView(current)).toBe(false);
+  await page.click('[data-action="play"]');
+  await expect.poll(() => inView(page.locator(".bar-cell.current"))).toBe(true);
+  await page.click('[data-action="play"]');
+  await expect(page.locator('[data-action="play"]')).toHaveAttribute("aria-label", "Play");
 });

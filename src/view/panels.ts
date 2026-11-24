@@ -1,3 +1,4 @@
+import { setHtml } from "./dom";
 import { exportAppliesPractice, exportFormat } from "../export";
 import { formatTempo, LOW_CONFIDENCE, loopBars, MAX_BPM_FACTOR, MIN_BPM_FACTOR } from "../analysis/grid";
 import { KEY_UNCLEAR } from "../analysis/key";
@@ -274,7 +275,7 @@ function updateCapo(project: Project, record: AnalysisRecord | null | undefined)
         }</small></div>`
       ).join("")
       : `<p class="muted">The chords appear once they are detected.</p>`;
-    if (pairs.innerHTML !== html) pairs.innerHTML = html;
+    setHtml(pairs, html);
   }
   const suggestions = document.querySelector<HTMLElement>("#capo-suggestions");
   if (suggestions) {
@@ -287,7 +288,7 @@ function updateCapo(project: Project, record: AnalysisRecord | null | undefined)
         }</span><small>${Math.round(share * 100)}% open</small></button>`
       ).join("")
       : "";
-    if (suggestions.innerHTML !== html) suggestions.innerHTML = html;
+    setHtml(suggestions, html);
   }
 }
 
@@ -397,7 +398,7 @@ function updateExport(project: Project): void {
       const on = picked.includes(track);
       return `<button class="stem-pick stem-${track}" role="checkbox" aria-checked="${on}" data-action="export-pick" data-stem="${track}"><span class="pick-box" aria-hidden="true"></span><span class="stem-dot" aria-hidden="true"></span>${TRACK_LABELS[track]}</button>`;
     }).join("");
-    if (picks.innerHTML !== html) picks.innerHTML = html;
+    setHtml(picks, html);
   }
   setText('[data-action="export-pick-all"]', picked.length === all.length ? "Clear all" : "Select all");
   setText("#stems-note", picked.length > 1 ? "Several stems download as one zip file." : "One stem downloads as a single audio file.");
@@ -488,7 +489,7 @@ export function updatePanels(project: Project): void {
   const keyGrid = document.querySelector<HTMLElement>("#key-grid");
   if (keyGrid) {
     const html = keyGridMarkup(key, semitones);
-    if (keyGrid.innerHTML !== html) keyGrid.innerHTML = html;
+    setHtml(keyGrid, html);
   }
   const names = document.querySelector<HTMLInputElement>("#chord-names");
   if (names) names.checked = project.chordNames !== "original";
@@ -592,7 +593,7 @@ function updateRhythm(project: Project, record: AnalysisRecord | null | undefine
     const html = grid
       ? Array.from({ length: grid.beatsPerBar }, (_, i) => `<span class="${i === 0 && accent ? "accent" : ""}">${i + 1}</span>`).join("")
       : "";
-    if (cells.innerHTML !== html) cells.innerHTML = html;
+    setHtml(cells, html);
   }
   for (const button of document.querySelectorAll<HTMLElement>('[data-action="click-sub"]')) {
     const on = Number(button.dataset.sub) === (project.clickSubdivision ?? 1);

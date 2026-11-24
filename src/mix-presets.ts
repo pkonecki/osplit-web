@@ -17,6 +17,7 @@ export interface MixPreset {
 export const MIX_PRESETS: readonly MixPreset[] = [
   { id: "full", label: "Full mix", heard: () => true },
   { id: "no-vocals", label: "No vocals", heard: (stem) => stem !== "vocals" },
+  { id: "no-bass", label: "No bass", heard: (stem) => stem !== "bass" },
   { id: "drums-bass", label: "Drums + bass", heard: (stem) => stem === "drums" || stem === "bass" },
 ];
 

@@ -1,3 +1,4 @@
+import { setHtml } from "./dom";
 import { beatInBar } from "../analysis/chart";
 import { countingIn, playerTime } from "../player";
 import { projectGrid } from "../tasks/analysis";
@@ -64,7 +65,7 @@ export function updatePlayerDisplay(project?: Project | null): void {
   setText("#current-time", formatTime(time.position));
   setText("#total-time", formatTime(time.duration));
   const glyph = playGlyph(time);
-  if (play.innerHTML !== glyph) play.innerHTML = glyph;
+  setHtml(play, glyph);
   play.setAttribute("aria-label", playLabel(time));
   play.disabled = !time.ready;
   const fill = document.querySelector<HTMLElement>(".scrub-fill");
