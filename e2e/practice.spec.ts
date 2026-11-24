@@ -271,8 +271,9 @@ test("exports the mix with speed, key and loop applied", async ({ page }) => {
   await openApp(page);
   await separateClip(page, "Export practice", clip);
   await openPanel(page, "export");
-  await page.selectOption('[data-action="export-format"]', "wav");
-  await expect(page.locator(".export-practice")).toBeHidden();
+  await page.click('[data-action="export-format"][data-format="wav"]');
+  await page.click('[data-action="export-what"][data-what="mix"]');
+  await expect(page.locator('[data-action="export-practice"]')).toBeDisabled();
   await closePanel(page);
 
   // Half speed over a 1 s loop: 2 s of audio, still at the original pitch
@@ -284,10 +285,10 @@ test("exports the mix with speed, key and loop applied", async ({ page }) => {
   await seekTo(page, 2);
   await page.click('[data-action="loop-set"][data-edge="end"]');
   await openPanel(page, "export");
-  await expect(page.locator(".export-practice")).toBeVisible();
+  await expect(page.locator('[data-action="export-practice"]')).toBeEnabled();
   await page.locator('[data-action="export-practice"]').check();
   let download = page.waitForEvent("download");
-  await page.click('[data-action="export-mix"]');
+  await page.click('[data-action="export-run"]');
   let file = await download;
   expect(file.suggestedFilename()).toBe("Export practice-mix-practice.wav");
   let left = leftChannel(readFileSync(await file.path()));
@@ -305,7 +306,7 @@ test("exports the mix with speed, key and loop applied", async ({ page }) => {
   await press(page, "l");
   await openPanel(page, "export");
   download = page.waitForEvent("download");
-  await page.click('[data-action="export-mix"]');
+  await page.click('[data-action="export-run"]');
   file = await download;
   left = leftChannel(readFileSync(await file.path()));
   expect(left.length / 44_100).toBeCloseTo(6, 1);
@@ -315,7 +316,7 @@ test("exports the mix with speed, key and loop applied", async ({ page }) => {
   // Unchecked, the export is the plain mix again.
   await page.locator('[data-action="export-practice"]').uncheck();
   download = page.waitForEvent("download");
-  await page.click('[data-action="export-mix"]');
+  await page.click('[data-action="export-run"]');
   file = await download;
   expect(file.suggestedFilename()).toBe("Export practice-mix.wav");
   left = leftChannel(readFileSync(await file.path()));

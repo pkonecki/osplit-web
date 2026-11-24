@@ -99,7 +99,7 @@ export function renderPractice(project: Project): string {
     icon("export", 20)
   }Export</button>
     </nav>
-    <div class="panel-sheet-host">${exportPanel(project)}</div>
+    <div class="panel-sheet-host">${exportPanel()}</div>
     <button class="panel-backdrop" data-action="panel-close" aria-label="Close panel" tabindex="-1" hidden></button>
     </div>
   `;

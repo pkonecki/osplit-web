@@ -67,8 +67,10 @@ test("detects the key and chords, names them with the key shift, exports them", 
 
   // A chord sheet in bars, named as shown (original), and a .lab file.
   await openPanel(page, "export");
+  await page.click('[data-action="export-what"][data-what="chords"]');
+  await expect(page.locator("#chord-preview")).toContainText("Key: A minor");
   let download = page.waitForEvent("download");
-  await page.click('[data-action="export-chords"][data-format="txt"]');
+  await page.click('[data-action="export-run"]');
   let file = await download;
   expect(file.suggestedFilename()).toBe("Chords-chords.txt");
   const sheet = readFileSync(await file.path(), "utf8");

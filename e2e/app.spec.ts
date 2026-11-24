@@ -242,15 +242,20 @@ test("separates a clip and mixes the stems", async ({ page }) => {
 
   // Export one stem, as FLAC by default and as WAV when chosen.
   await openPanel(page, "export");
+  await expect(page.locator('[data-action="export-run"]')).toHaveText("Export 5 stems · zip");
+  await page.click('[data-action="export-pick-all"]');
+  await expect(page.locator('[data-action="export-run"]')).toBeDisabled();
+  await page.click('[data-action="export-pick"][data-stem="vocals"]');
+  await expect(page.locator('[data-action="export-run"]')).toHaveText("Export 1 stem · FLAC");
   const flacDownload = page.waitForEvent("download");
-  await page.click('[data-action="export-stem"][data-stem="vocals"]');
+  await page.click('[data-action="export-run"]');
   const flac = await flacDownload;
   expect(flac.suggestedFilename()).toBe("E2E clip-vocals.flac");
   expect(readFileSync(await flac.path()).subarray(0, 4).toString()).toBe("fLaC");
 
-  await page.selectOption('[data-action="export-format"]', "wav");
+  await page.click('[data-action="export-format"][data-format="wav"]');
   const wavDownload = page.waitForEvent("download");
-  await page.click('[data-action="export-stem"][data-stem="vocals"]');
+  await page.click('[data-action="export-run"]');
   const wav = await wavDownload;
   expect(wav.suggestedFilename()).toBe("E2E clip-vocals.wav");
   const wavBytes = readFileSync(await wav.path());
@@ -260,9 +265,10 @@ test("separates a clip and mixes the stems", async ({ page }) => {
   // The choice is remembered, and also applies to the mix.
   await page.reload();
   await openPanel(page, "export");
-  await expect(page.locator('[data-action="export-format"]')).toHaveValue("wav");
+  await expect(page.locator('[data-action="export-format"][data-format="wav"]')).toHaveAttribute("aria-pressed", "true");
+  await page.click('[data-action="export-what"][data-what="mix"]');
   const mixDownload = page.waitForEvent("download");
-  await page.click('[data-action="export-mix"]');
+  await page.click('[data-action="export-run"]');
   const mix = await mixDownload;
   expect(mix.suggestedFilename()).toBe("E2E clip-mix.wav");
   expect(readFileSync(await mix.path()).length).toBe(44 + 44_100 * 3 * 4);
@@ -349,10 +355,10 @@ test("mixer extras: solo, presets, shortcuts, peaks, media session and zip", asy
   await page.keyboard.press("ArrowLeft");
   await expect.poll(async () => Number(await seekBar.inputValue())).toBe(0);
   // Typing in a field keeps its usual meaning.
-  await openPanel(page, "export");
-  await page.selectOption('[data-action="export-format"]', "flac");
-  await page.locator('[data-action="export-format"]').focus();
+  await openPanel(page, "key");
+  await page.locator("#key-select").focus();
   await page.keyboard.press("Space");
+  await page.keyboard.press("Escape");
   await expect(page.locator('[data-action="play"]')).toHaveAttribute("aria-label", "Play");
 
   // Media Session shows the project.
@@ -379,10 +385,10 @@ test("mixer extras: solo, presets, shortcuts, peaks, media session and zip", asy
   await page.reload();
   await expect.poll(async () => (await readStore(page, "peaks")).length).toBe(5);
 
-  // Export all: a zip of the five stems and the mix.
+  // Export every stem: a zip of the five.
   await openPanel(page, "export");
   const download = page.waitForEvent("download");
-  await page.click('[data-action="export-all"]');
+  await page.click('[data-action="export-run"]');
   const zip = await download;
   expect(zip.suggestedFilename()).toBe("Extras-stems.zip");
   const bytes = readFileSync(await zip.path());
@@ -405,8 +411,14 @@ test("mixer extras: solo, presets, shortcuts, peaks, media session and zip", asy
     "Extras-drums.flac",
     "Extras-bass.flac",
     "Extras-other.flac",
-    "Extras-mix.flac",
   ]);
+  // A few of them: named after them.
+  await page.click('[data-action="export-pick"][data-stem="vocals"]');
+  await page.click('[data-action="export-pick"][data-stem="piano"]');
+  await page.click('[data-action="export-pick"][data-stem="other"]');
+  const subset = page.waitForEvent("download");
+  await page.click('[data-action="export-run"]');
+  expect((await subset).suggestedFilename()).toBe("Extras-drums-bass.zip");
   for (const entry of entries) expect(entry.size).toBeGreaterThan(1000);
 });
 

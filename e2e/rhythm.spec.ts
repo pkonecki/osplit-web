@@ -187,13 +187,16 @@ test("finds the tempo, plays the click and loops bars", async ({ page }) => {
   await expect(page.locator("#tempo-chip")).toContainText("BPM");
   await expect(clickMute).toHaveAttribute("aria-pressed", "false");
 
-  // Export all adds the click track.
+  // The click can go in the zip of stems.
   await openPanel(page, "export");
+  await page.click('[data-action="export-pick"][data-stem="click"]');
   const download = page.waitForEvent("download");
-  await page.click('[data-action="export-all"]');
-  const names = zipEntries(readFileSync(await (await download).path()));
+  await page.click('[data-action="export-run"]');
+  const file = await download;
+  expect(file.suggestedFilename()).toBe("Rhythm-stems.zip");
+  const names = zipEntries(readFileSync(await file.path()));
   expect(names).toContain("Rhythm-click.flac");
-  expect(names).toContain("Rhythm-mix.flac");
+  expect(names).toContain("Rhythm-drums.flac");
 
   // A project without an analysis (separated before M9) offers to find it.
   await page.evaluate(async () => {

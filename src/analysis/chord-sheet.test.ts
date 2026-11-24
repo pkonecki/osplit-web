@@ -51,6 +51,16 @@ describe("chord sheet", () => {
     );
   });
 
+  it("heads each marker's bars with its name", () => {
+    const text = chordSheet(chords, grid, 16.5, aMinor, ["Song"], [
+      { bar: 1, name: "Intro" },
+      { bar: 3, name: "Verse" },
+    ]);
+    expect(text).toBe(
+      "Song\n\n[Intro]\n| Am    | F     |\n\n[Verse]\n| C     | G     | C G/B |\n",
+    );
+  });
+
   it("lists chords with times without a grid", () => {
     expect(chordSheet(chords.slice(0, 3), null, 4.5, aMinor, ["Song"]))
       .toBe("Song\n\n0:00   Am\n0:02   F\n");

@@ -60,10 +60,14 @@ test("asks before deleting a project, in an accessible dialog", async ({ page })
   await openApp(page);
   await addEmptyProject(page, "Keep me?");
   await page.click('[data-action="home"]:visible');
-  const card = page.locator('[data-action="delete"]');
+  const card = page.locator(".project-row");
   const dialog = page.locator("dialog.confirm-dialog");
+  const askToDelete = async () => {
+    await page.getByRole("button", { name: "More actions for Keep me?" }).click();
+    await page.getByRole("menuitem", { name: "Delete" }).click();
+  };
 
-  await card.click();
+  await askToDelete();
   await expect(dialog).toBeVisible();
   // Cancel has the focus, so Enter keeps the project.
   await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
@@ -71,13 +75,13 @@ test("asks before deleting a project, in an accessible dialog", async ({ page })
   await expect(dialog).toHaveCount(0);
   await expect(card).toHaveCount(1);
 
-  await card.click();
+  await askToDelete();
   await expect(dialog).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(card).toHaveCount(1);
 
-  await card.click();
+  await askToDelete();
   await dialog.getByRole("button", { name: "Delete project" }).click();
   await expect(card).toHaveCount(0);
   expect(await readStore(page, "projects")).toHaveLength(0);
@@ -162,7 +166,7 @@ test("removes the source after separation when asked; progress is accessible", a
 
   // Splitting again needs the file.
   await page.click('[data-action="project-menu"]');
-  await page.getByRole("button", { name: "Split again…" }).click();
+  await page.getByRole("menuitem", { name: /^Split again…/ }).click();
   await expect(page.locator(".source-removed")).toContainText("Import it again");
   await expect(page.locator('[data-action="separate"]')).toHaveCount(0);
   await page.click('[data-action="split-cancel"]');
@@ -211,7 +215,7 @@ test("moves a project to another device in a project file", async ({ page, brows
 
   const download = page.waitForEvent("download");
   await page.click('[data-action="project-menu"]');
-  await page.getByRole("button", { name: "Save as project file" }).click();
+  await page.getByRole("menuitem", { name: /^Save as project file/ }).click();
   const file = await download;
   expect(file.suggestedFilename()).toBe("Travelling song.osplit");
   const path = testInfo.outputPath("Travelling song.osplit");
