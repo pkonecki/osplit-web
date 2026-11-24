@@ -873,3 +873,24 @@ button.info-chip:hover { color: var(--text); }
 .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--text-3); }
 .status-dot.ok { background: var(--accent); }
 .about-links { margin: 0; font-size: 13px; }
+
+/* Rhythm extras and capo. */
+.preset-grid.cols-1 { grid-template-columns: 1fr; }
+.preset-grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.two-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-3); }
+.beat-cells { display: flex; gap: 6px; }
+.beat-cells span { flex: 1; height: 26px; display: grid; place-items: center; border-radius: var(--radius-s); color: var(--text-3); background: var(--surface-1); font-size: 12px; font-weight: 600; }
+.beat-cells span.accent { color: var(--on-accent); background: var(--accent); }
+.capo-pairs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.capo-pair { height: 62px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border-radius: var(--radius-m); background: var(--surface-1); }
+.capo-pair strong { color: var(--accent); font: 700 20px/1 var(--font-display); }
+.capo-pair small { color: var(--text-3); font-size: 11px; }
+.capo-pairs p { grid-column: 1 / -1; margin: 0; font-size: 12px; }
+.capo-suggestions { display: flex; flex-direction: column; gap: 6px; }
+.capo-suggestion { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 var(--space-3); border: 1px solid var(--line-4); border-radius: 10px; color: var(--text); background: transparent; text-align: left; cursor: pointer; }
+.capo-suggestion strong { min-width: 58px; }
+.capo-suggestion span { flex: 1; color: var(--text-2); }
+.capo-suggestion small { color: var(--text-3); font-size: 11px; }
+.capo-suggestion.on { border-color: var(--accent); background: var(--accent-tint); }
+.capo-info { color: var(--accent); background: var(--accent-tint); }
+.panel-capo { width: 400px; }

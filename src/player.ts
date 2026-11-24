@@ -55,6 +55,12 @@ let clickGrid: BeatGrid | null = null;
 let clickGridProject: string | null = null;
 /** The loop now applied, which the click follows too. */
 let appliedLoop: LoopRegion | null = null;
+/** Bars of count-in before playback and before a loop restarts. */
+let countInBars = 0;
+/** The count-in running before playback starts, if any. */
+let countIn: { timer: number; resolve: () => void } | null = null;
+/** Fires at the loop end when a count-in has to play before it restarts. */
+let loopTimer: number | undefined;
 /** Lead before decoded sources start (BufferEngine's START_LEAD_SECONDS). */
 const BUFFER_START_LEAD = 0.05;
 let onTick: () => void = () => {};
@@ -90,7 +96,80 @@ export function playerEngineKind(): PlaybackEngine["kind"] | null {
 }
 
 export function isPlaying(): boolean {
-  return engine?.time().playing ?? false;
+  return countIn !== null || (engine?.time().playing ?? false);
+}
+
+/** Whether a count-in is playing before playback starts. */
+export function countingIn(): boolean {
+  return countIn !== null;
+}
+
+function stopCountIn(): void {
+  if (!countIn) return;
+  window.clearTimeout(countIn.timer);
+  countIn.resolve();
+  countIn = null;
+}
+
+function clearLoopTimer(): void {
+  if (loopTimer !== undefined) window.clearTimeout(loopTimer);
+  loopTimer = undefined;
+}
+
+/**
+ * Plays the count-in, then resolves when playback should start (false if
+ * it was stopped meanwhile). Without a count-in or a grid, resolves at once.
+ */
+async function runCountIn(): Promise<boolean> {
+  if (!engine || !click || !clickGrid || countInBars <= 0 || !audioContext) return true;
+  stopCountIn();
+  const beatSeconds = 60 / clickGrid.bpm / engine.time().rate;
+  const end = click.countIn(countInBars, clickGrid.beatsPerBar, beatSeconds);
+  const lead = engine.kind === "buffer" ? BUFFER_START_LEAD : 0;
+  const wait = Math.max(0, (end - audioContext.currentTime - lead) * 1000);
+  return new Promise<boolean>((resolve) => {
+    const current = {
+      timer: window.setTimeout(() => {
+        countIn = null;
+        resolve(true);
+      }, wait),
+      resolve: () => resolve(false),
+    };
+    countIn = current;
+    onTick();
+  });
+}
+
+/**
+ * With a count-in and a loop, the stems don't loop by themselves: at the
+ * loop end they stop, go back to the loop start, and play again after the
+ * count-in.
+ */
+function armLoopCountIn(): void {
+  clearLoopTimer();
+  const time = engine?.time();
+  if (!engine || !time?.playing || !appliedLoop || countInBars <= 0 || !clickGrid) return;
+  const left = (appliedLoop.end - time.position) / time.rate;
+  if (left <= 0) {
+    engine.seek(appliedLoop.start);
+    armLoopCountIn();
+    return;
+  }
+  loopTimer = window.setTimeout(() => {
+    loopTimer = undefined;
+    const current = engine;
+    if (!current || !appliedLoop) return;
+    current.pause();
+    current.seek(appliedLoop.start);
+    click?.update();
+    onTick();
+    void runCountIn().then(async (go) => {
+      if (!go || engine !== current) return;
+      await current.play();
+      restartClick();
+      armLoopCountIn();
+    });
+  }, left * 1000);
 }
 
 export async function preparePlayers(project: Project): Promise<void> {
@@ -118,7 +197,8 @@ export async function preparePlayers(project: Project): Promise<void> {
     click ??= new ClickScheduler(context, context.destination, () => {
       const time = engine?.time() ??
         { position: 0, duration: 0, playing: false, rate: 1 };
-      return { ...time, loop: appliedLoop };
+      // With a count-in the stems don't loop by themselves, nor does the click.
+      return { ...time, loop: countInBars > 0 && clickGrid ? null : appliedLoop };
     });
     const kind = playbackEngineFor(
       await stemFrameCount(stems[0].blob),
@@ -166,6 +246,8 @@ export async function preparePlayers(project: Project): Promise<void> {
 export function releasePlayers(): void {
   if (progressTimer !== undefined) window.clearInterval(progressTimer);
   progressTimer = undefined;
+  stopCountIn();
+  clearLoopTimer();
   engine?.release();
   engine = null;
   click?.setGrid(null);
@@ -178,7 +260,10 @@ export function releasePlayers(): void {
 }
 
 export async function pauseAll(): Promise<void> {
+  stopCountIn();
+  clearLoopTimer();
   engine?.pause();
+  click?.restart();
   click?.update();
 }
 
@@ -224,13 +309,17 @@ export async function playAll(project: Project): Promise<void> {
     engine.setGain(stem, stemVolume(project, stem));
   }
   click?.setLevel(stemVolume(project, "click"));
-  await engine.play();
+  const current = engine;
+  if (!(await runCountIn()) || engine !== current) return;
+  await current.play();
   restartClick();
+  armLoopCountIn();
 }
 
 export function seekAll(seconds: number): void {
   engine?.seek(seconds);
   restartClick();
+  armLoopCountIn();
   onTick();
 }
 
@@ -246,7 +335,11 @@ export async function applyPractice(project: Project): Promise<void> {
   const speed = projectSpeed(project);
   current.setRate(speed);
   appliedLoop = activeLoop(project);
-  current.setLoop(appliedLoop);
+  countInBars = project.countInBars ?? 0;
+  click?.setOptions({ accent: project.clickAccent !== false, subdivision: project.clickSubdivision ?? 1 });
+  // With a count-in, the loop restarts by itself (armLoopCountIn).
+  current.setLoop(countInBars > 0 && clickGrid ? null : appliedLoop);
+  armLoopCountIn();
   // The click's lookahead was computed at the old speed and loop.
   click?.restart();
   const transpose = busTranspose(current.kind, speed, projectSemitones(project));

@@ -11,7 +11,7 @@ import {
   toPcm16,
   WAV_HEADER_BYTES,
 } from "./audio-core";
-import { renderClickTrack } from "./analysis/click";
+import { type ClickOptions, renderClickTrack } from "./analysis/click";
 import type { BeatGrid } from "./analysis/grid";
 import { type ChordNaming, chordSheet, labFile } from "./analysis/chord-sheet";
 import { formatTempo } from "./analysis/grid";
@@ -192,6 +192,11 @@ export async function exportStems(project: Project, tracks: readonly Track[]): P
   downloadBlob(await createZip(entries), stemsZipName(base, picked, project.completedStems.length));
 }
 
+/** How the project's click sounds: its accent and subdivision. */
+function clickOptions(project: Project): ClickOptions {
+  return { accent: project.clickAccent !== false, subdivision: project.clickSubdivision ?? 1 };
+}
+
 /** The project's beat grid, which the click export needs. */
 function requireGrid(project: Project): BeatGrid {
   const grid = projectGrid(project.id);
@@ -204,7 +209,7 @@ async function clickFile(project: Project, format: AudioFormat): Promise<Blob> {
   const grid = requireGrid(project);
   const duration = cachedAnalysis(project.id)?.duration ?? 0;
   const frames = Math.round(duration * SAMPLE_RATE);
-  const click = renderClickTrack(grid, { start: 0, end: duration, speed: 1 }, SAMPLE_RATE, frames);
+  const click = renderClickTrack(grid, { start: 0, end: duration, speed: 1 }, SAMPLE_RATE, frames, clickOptions(project));
   const stereo = new Float32Array(frames * CHANNELS);
   for (let i = 0; i < frames; i++) {
     stereo[i * CHANNELS] = click[i];
@@ -255,7 +260,7 @@ async function mixFile(project: Project, format: AudioFormat): Promise<Blob> {
       speed: practice?.speed ?? 1,
     };
     clickTrack = (frames) => {
-      const track = renderClickTrack(click.grid, region, SAMPLE_RATE, frames);
+      const track = renderClickTrack(click.grid, region, SAMPLE_RATE, frames, clickOptions(project));
       for (let i = 0; i < track.length; i++) track[i] *= click.gain;
       return track;
     };

@@ -1,4 +1,4 @@
-import type { AnalysisRecord, BeatsPerBar, GridEdits } from "../types";
+import type { AnalysisRecord, GridEdits } from "../types";
 import { type LoopRegion, normalizeLoop } from "../practice";
 
 /**
@@ -11,7 +11,9 @@ export interface BeatGrid {
   beats: Float64Array;
   /** Tempo at the original speed. */
   bpm: number;
-  beatsPerBar: BeatsPerBar;
+  beatsPerBar: number;
+  /** The beat's note value: 4, or 8 in 6/8 and 7/8. */
+  beatUnit?: 4 | 8;
   /** Index of a beat that starts a bar (0 ≤ firstDownbeat < beatsPerBar). */
   firstDownbeat: number;
   /** 0–1; below LOW_CONFIDENCE the grid is shown but not snapped to. */
@@ -70,11 +72,12 @@ export function effectiveGrid(record: AnalysisRecord): BeatGrid | null {
     bpm /= 2;
   }
   if (beats.length === 0) return null;
-  const beatsPerBar = edits.beatsPerBar ?? record.beatsPerBar;
+  const beatsPerBar = edits.metre?.beats ?? edits.beatsPerBar ?? record.beatsPerBar;
   return {
     beats,
     bpm,
     beatsPerBar,
+    beatUnit: edits.metre?.unit ?? 4,
     firstDownbeat: mod(firstDownbeat + (edits.downbeatShift ?? 0), beatsPerBar),
     confidence,
   };

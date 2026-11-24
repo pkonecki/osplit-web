@@ -7,7 +7,7 @@ import { escapeHtml } from "./format";
 import { nowNextMarkup } from "./harmony";
 import { icon } from "./icons";
 import { mixerMarkup } from "./mixer";
-import { exportPanel, keyPanel, loopPanel, panelChip, speedPanel } from "./panels";
+import { capoPanel, exportPanel, keyPanel, loopPanel, panelChip, speedPanel } from "./panels";
 import { playerMarkup } from "./player-bar";
 
 /**
@@ -65,6 +65,7 @@ export function renderPractice(project: Project): string {
             <span class="info-chip" id="song-key-chip">Key…</span>
             <button class="info-chip" data-action="panel" data-panel="rhythm" aria-haspopup="dialog" aria-expanded="false" title="Rhythm settings"><span id="tempo-chip">…</span></button>
             <button class="info-chip" data-action="panel" data-panel="rhythm" aria-haspopup="dialog" aria-expanded="false" title="Beats per measure"><span id="metre-chip">—</span></button>
+            <button class="info-chip capo-info" data-action="panel" data-panel="capo" aria-haspopup="dialog" aria-expanded="false" id="capo-chip" hidden>Capo</button>
           </div>
           <button class="button subtle with-icon tablet-only" data-action="mixer-toggle" aria-pressed="${mixerOpen}">${
     icon("mixer", 18)
@@ -81,6 +82,7 @@ export function renderPractice(project: Project): string {
           <div class="popover-anchor">${panelChip("speed", "Speed", "speed-chip-value")}${speedPanel(project)}</div>
           <div class="popover-anchor">${panelChip("key", "Key", "key-chip-value")}${keyPanel()}</div>
           <div class="popover-anchor">${panelChip("loop", "Loop", "loop-chip-value")}${loopPanel()}</div>
+          <div class="popover-anchor">${panelChip("capo", "Capo", "capo-chip-value")}${capoPanel()}</div>
           ${nowNextMarkup()}
         </div>
         <div class="chart-area">${markersMarkup()}${chartMarkup()}</div>
