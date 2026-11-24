@@ -330,6 +330,23 @@ function readProject(value: unknown): Project {
   ) {
     project.loop = { start: loop.start, end: loop.end, enabled: loop.enabled === true } satisfies ProjectLoop;
   }
+  if (Array.isArray(value.markers)) {
+    const markers = value.markers
+      .filter((item: unknown) =>
+        isRecord(item) && Number.isInteger(item.bar) && isNumber(item.time) && item.time >= 0 &&
+        typeof item.name === "string"
+      )
+      .slice(0, 200)
+      .map((item: { bar: number; time: number; name: string }) => ({
+        bar: item.bar,
+        time: item.time,
+        name: item.name.slice(0, 40),
+      }));
+    // Sorted, one per bar.
+    const sorted = markers.sort((a: { bar: number }, b: { bar: number }) => a.bar - b.bar)
+      .filter((item: { bar: number }, i: number, all: { bar: number }[]) => i === 0 || all[i - 1].bar !== item.bar);
+    if (sorted.length) project.markers = sorted;
+  }
   if (value.chordNames === "original" || value.chordNames === "transposed") {
     project.chordNames = value.chordNames;
   }

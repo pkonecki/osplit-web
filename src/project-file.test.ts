@@ -328,6 +328,26 @@ describe("project files", () => {
     expect(read.loop).toBeUndefined();
   });
 
+  it("keeps valid markers, sorted, one per bar", async () => {
+    const project = await storedProject();
+    const file = await withManifest(await exported(project.id), (manifest) => {
+      manifest.project.markers = [
+        { bar: 9, time: 16, name: "Chorus" },
+        { bar: 1, time: 0, name: "Intro" },
+        { bar: 9, time: 16.1, name: "Duplicate" },
+        { bar: 3.5, time: 4, name: "Half a bar" },
+        { bar: 5, time: -1, name: "Before the start" },
+        { bar: 5, time: 8, name: 7 },
+        "nonsense",
+      ];
+    });
+    const { project: read } = await readProjectFile(file);
+    expect(read.markers).toEqual([
+      { bar: 1, time: 0, name: "Intro" },
+      { bar: 9, time: 16, name: "Chorus" },
+    ]);
+  });
+
   it("drops a malformed analysis, to be redone", async () => {
     const project = await storedProject();
     const file = await withManifest(await exported(project.id), (manifest) => {

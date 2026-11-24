@@ -84,6 +84,8 @@ test("detects the key and chords, names them with the key shift, exports them", 
   await openPanel(page, "key");
   await page.locator("#key-select").selectOption("");
   await expect(chip).toHaveText(`${original} → ${shifted}`);
+  // Saved before the reload (the page shows the change before it is written).
+  await expect.poll(async () => (await analysis(page)).keyOverride).toBeUndefined();
   await page.reload();
   await expect(chip).toHaveText(`${original} → ${shifted}`);
   await expect.poll(() => chartLabels(page)).toContain("C");

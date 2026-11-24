@@ -751,3 +751,63 @@ button.info-chip:hover { color: var(--text); }
   .panel-backdrop[hidden] { display: none; }
   .big-value { font-size: 52px; }
 }
+
+/* Markers: a column beside the chart on desktop, a strip on phones. */
+.chart-area { flex: 1; min-height: 0; display: flex; gap: var(--space-4); }
+.chart-area .chord-chart { flex: 1; min-width: 0; }
+.markers { flex: 0 0 216px; min-height: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.markers-head { display: flex; align-items: center; justify-content: space-between; padding: 0 var(--space-1); }
+.markers-title { color: var(--text-3); font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+.markers-add { height: 30px; display: inline-flex; align-items: center; gap: var(--space-1); padding: 0 10px; border: 1px dashed #5b6455; border-radius: 9px; color: var(--text-2); background: transparent; font-size: 12px; font-weight: 600; cursor: pointer; }
+.markers-add:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.markers-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.markers-empty { margin: var(--space-2) var(--space-1); font-size: 12px; line-height: 1.5; }
+.marker-item { display: flex; align-items: center; border-radius: 10px; }
+.marker-item.current { background: var(--surface-2); }
+.marker-item.current .marker-name { color: var(--accent); }
+.marker-jump { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: var(--space-2) 10px; border: 0; color: var(--text); background: transparent; text-align: left; cursor: pointer; }
+.marker-name { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.marker-meta { color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.marker-loop { width: 32px; height: 32px; margin-right: var(--space-1); display: grid; place-items: center; border: 0; border-radius: var(--radius-s); color: var(--text-3); background: transparent; cursor: pointer; }
+.marker-loop:hover, .marker-loop.on { color: var(--accent); }
+.marker-loop.on { background: var(--accent-tint); }
+.markers .panel { width: 360px; }
+.marker-start { font: 600 18px/1.3 var(--font-display); font-variant-numeric: tabular-nums; }
+.panel-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
+.section-head { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) 0 2px 32px; }
+.section-head:first-child { padding-top: 0; }
+.section-jump { display: flex; align-items: baseline; gap: var(--space-2); padding: 0; border: 0; color: var(--text); background: transparent; cursor: pointer; -webkit-touch-callout: none; user-select: none; }
+.section-name { font: 700 18px/1.2 var(--font-display); }
+.section-meta { color: var(--text-3); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.section-line { flex: 1; height: 1px; background: var(--line-2); }
+.section-loop { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line-4); border-radius: 14px; color: var(--text-2); background: transparent; font-size: 12px; font-weight: 600; cursor: pointer; }
+.section-loop.on { color: var(--accent); border-color: var(--accent); background: var(--accent-tint); }
+.scrub-tick { position: absolute; top: -5px; width: 2px; height: 14px; margin-left: -1px; border-radius: 1px; background: var(--text-2); }
+.player-where strong { color: var(--text); }
+.dialog-title { margin: 0 0 var(--space-3); font-size: 17px; }
+.confirm-dialog .text-input { margin: var(--space-2) 0 var(--space-4); }
+
+@media (max-width: 999px) and (min-width: 768px) {
+  .markers { flex-basis: 180px; }
+}
+@media (max-width: 767px) {
+  .chart-area { flex-direction: column; gap: 10px; }
+  .markers { flex: none; flex-direction: row; align-items: center; gap: 6px; padding-left: var(--space-4); }
+  .markers-head { padding: 0; }
+  .markers-title { display: none; }
+  .markers-add { width: 32px; height: 32px; justify-content: center; padding: 0; border-radius: 16px; }
+  .markers-add span { display: none; }
+  .markers-list { flex-direction: row; overflow-x: auto; overflow-y: hidden; padding-right: var(--space-4); scrollbar-width: none; }
+  .markers-list::-webkit-scrollbar { display: none; }
+  .markers-empty { margin: 0; white-space: nowrap; }
+  .marker-item { flex: none; }
+  .marker-jump { height: 32px; flex-direction: row; align-items: center; padding: 0 var(--space-3); border: 1px solid var(--line-4); border-radius: 16px; font-size: 12px; }
+  .marker-item.current { background: transparent; }
+  .marker-item.current .marker-jump { border-color: var(--accent); background: var(--accent-tint); }
+  .marker-meta, .marker-loop { display: none; }
+  .practice[data-tab="mixer"] .chart-area { display: none; }
+  .section-head { padding-left: 26px; }
+  .section-name { font-size: 15px; }
+  .section-loop span { display: none; }
+  .section-loop { width: 30px; justify-content: center; padding: 0; }
+}

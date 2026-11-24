@@ -206,6 +206,14 @@ and repeat an A–B loop. Speed, key and loop are saved with each project.
   follows it while playing. Click a bar to go to it; Shift-click a bar to
   loop from the bar playing to that one. Without a beat grid, the chart lists
   the chords in time order.
+- **Markers:** name the parts of the song (intro, verse, chorus…) at a bar:
+  **Add** beside the chart (the **+** of the strip on a phone) or `M` opens
+  a panel at the bar playing, with a bar earlier / later and names to pick.
+  Each marker heads its bars in the chart, is listed beside it (a strip on a
+  phone) and ticks the seek bar. Click it to jump there, or its loop button
+  to loop its section: from its bar to the bar before the next marker.
+  Right-click a heading (long-press on a phone) to rename or delete it.
+  Markers keep their place in the music when the grid is corrected.
 - **Loop:** the Loop button in the player (or `L`) loops 4 bars from the
   playhead (4 s without a beat grid) when there is no loop, and otherwise
   turns it on or off. The Loop panel sets A and B at the playhead, loops 1,
@@ -292,6 +300,8 @@ focused slider):
 | ← / → | Previous or next bar (5 s without a beat grid) |
 | ↑ / ↓ | Speed +5% / −5% |
 | L | Turn the loop on or off (makes one when there is none) |
+| Shift+← / Shift+→ | Previous or next marker |
+| M | Add a marker at the playhead |
 | Home | Back to the start |
 | Esc | Close the open panel |
 

@@ -29,7 +29,7 @@ export function playerMarkup(project: Project): string {
         <span id="total-time" class="time muted">${formatTime(time.duration)}</span>
       </div>
       <div class="transport-row">
-        <div class="player-where"><span id="bar-label" class="muted"></span></div>
+        <div class="player-where"><strong id="section-label"></strong><span id="bar-label" class="muted"></span></div>
         <div class="transport">
           <button class="round-button loop-button" data-action="loop-toggle" aria-label="Loop" aria-pressed="false">${icon("loop", 20)}</button>
           <button class="round-button" data-action="bar-step" data-step="-1" aria-label="Previous bar">${icon("prev", 20)}</button>
@@ -72,6 +72,9 @@ export function updatePlayerDisplay(project?: Project | null): void {
   if (project) {
     const grid = projectGrid(project.id);
     const bar = currentBar();
+    let section = "";
+    if (bar) for (const marker of project.markers ?? []) if (marker.bar <= bar.number) section = marker.name;
+    setText("#section-label", section);
     setText("#bar-label", grid && bar ? `Bar ${bar.number} · beat ${beatInBar(grid, time.position) + 1}` : "");
   }
 }
