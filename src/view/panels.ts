@@ -33,8 +33,8 @@ import { icon } from "./icons";
  * place, so a slider being dragged keeps working.
  */
 
-export type PanelName = "speed" | "key" | "loop" | "rhythm" | "export";
-const PANELS: PanelName[] = ["speed", "key", "loop", "rhythm", "export"];
+export type PanelName = "speed" | "key" | "loop" | "rhythm" | "export" | "marker";
+const PANELS: PanelName[] = ["speed", "key", "loop", "rhythm", "export", "marker"];
 
 let open: PanelName | null = null;
 

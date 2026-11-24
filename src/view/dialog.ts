@@ -70,3 +70,36 @@ export function choiceDialog(
     dialog.showModal();
   });
 }
+
+/**
+ * Asks for a line of text in a modal <dialog> (renaming something).
+ * Resolves the trimmed text, or null for Cancel, Esc or an empty field.
+ */
+export function textDialog(title: string, label: string, value: string, maxLength = 80): Promise<string | null> {
+  const dialog = document.createElement("dialog");
+  dialog.className = "confirm-dialog";
+  dialog.setAttribute("aria-label", title);
+  dialog.innerHTML = `
+    <form method="dialog">
+      <h2 class="dialog-title">${escapeHtml(title)}</h2>
+      <label class="field-label" for="text-dialog-input">${escapeHtml(label)}</label>
+      <input id="text-dialog-input" class="text-input" type="text" maxlength="${maxLength}" autocomplete="off" />
+      <div class="dialog-actions">
+        <button type="button" class="button subtle" data-cancel>Cancel</button>
+        <button class="button primary" value="save">Save</button>
+      </div>
+    </form>`;
+  document.body.append(dialog);
+  const input = dialog.querySelector<HTMLInputElement>("input")!;
+  input.value = value;
+  dialog.querySelector("[data-cancel]")!.addEventListener("click", () => dialog.close(""));
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => {
+      const text = input.value.trim();
+      resolve(dialog.returnValue === "save" && text ? text : null);
+      dialog.remove();
+    }, { once: true });
+    dialog.showModal();
+    input.select();
+  });
+}

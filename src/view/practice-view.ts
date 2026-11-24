@@ -1,6 +1,7 @@
 import { state } from "../state";
 import { MODEL_STEMS, type Project, projectModel } from "../types";
 import { chartMarkup } from "./chart";
+import { markersMarkup } from "./markers-view";
 import { messageMarkup } from "./detail";
 import { escapeHtml } from "./format";
 import { nowNextMarkup } from "./harmony";
@@ -82,7 +83,7 @@ export function renderPractice(project: Project): string {
           <div class="popover-anchor">${panelChip("loop", "Loop", "loop-chip-value")}${loopPanel()}</div>
           ${nowNextMarkup()}
         </div>
-        ${chartMarkup()}
+        <div class="chart-area">${markersMarkup()}${chartMarkup()}</div>
       </div>
       ${mixerMarkup(project)}
     </div>

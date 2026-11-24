@@ -6,6 +6,7 @@ import type { ChordSegment, Project } from "../types";
 import { escapeHtml, formatTime } from "./format";
 import { chordNaming } from "./harmony";
 import { icon } from "./icons";
+import { sectionBars, sectionLoop } from "../markers";
 import { songPeaks } from "./song-peaks";
 
 /**
@@ -57,6 +58,8 @@ export function updateChart(project: Project): void {
     naming.key ? `${naming.key.tonic}:${naming.key.mode}` : "",
     peaks?.length ?? 0,
     Math.round(duration * 10),
+    JSON.stringify(project.markers ?? []),
+    project.loop ? `${project.loop.start}:${project.loop.end}:${project.loop.enabled}` : "",
   ].join("|");
   if (key === shownKey && chart.childElementCount) return;
   shownKey = key;
@@ -65,7 +68,7 @@ export function updateChart(project: Project): void {
   if (record && grid && duration > 0) {
     bars = chartBars(chords, grid, duration, naming);
     segments = [];
-    chart.innerHTML = barsMarkup(bars, peaks, duration);
+    chart.innerHTML = barsMarkup(bars, peaks, duration, project);
   } else if (record && chords.some((chord) => chord.root !== null)) {
     bars = [];
     segments = chords.filter((chord) => chord.root !== null);
@@ -78,17 +81,57 @@ export function updateChart(project: Project): void {
   updateChartPlayhead();
 }
 
-function barsMarkup(list: ChartBar[], peaks: Float32Array | null, duration: number): string {
+function barsMarkup(list: ChartBar[], peaks: Float32Array | null, duration: number, project: Project): string {
+  const markers = project.markers ?? [];
   const rows: string[] = [];
-  for (let i = 0; i < list.length; i += BARS_PER_ROW) {
-    const row = list.slice(i, i + BARS_PER_ROW);
+  // Rows of four bars, starting afresh at each marker, under its heading.
+  let row: { bar: ChartBar; index: number }[] = [];
+  const flush = () => {
+    if (!row.length) return;
     rows.push(`<div class="chart-row">
-      <span class="row-label" aria-hidden="true">${row[0].number}</span>
-      <div class="row-bars">${row.map((bar, j) => barMarkup(bar, i + j, peaks, duration)).join("")}</div>
+      <span class="row-label" aria-hidden="true">${row[0].bar.number}</span>
+      <div class="row-bars">${row.map(({ bar, index }) => barMarkup(bar, index, peaks, duration)).join("")}</div>
     </div>`);
-  }
+    row = [];
+  };
+  list.forEach((bar, index) => {
+    const markerIndex = markers.findIndex((marker) => marker.bar === bar.number);
+    if (markerIndex >= 0) {
+      flush();
+      rows.push(sectionHeadMarkup(project, markerIndex, list));
+    }
+    row.push({ bar, index });
+    if (row.length === BARS_PER_ROW) flush();
+  });
+  flush();
   return `<div class="chart-rows">${rows.join("")}</div>
     <p class="chart-hint">Click a bar to jump to it. Shift-click a bar to loop from the bar playing to that one.</p>`;
+}
+
+/** A marker's heading in the chart: jump to it, loop its section; right-click or long-press for more. */
+function sectionHeadMarkup(project: Project, index: number, list: ChartBar[]): string {
+  const markers = project.markers ?? [];
+  const marker = markers[index];
+  const { first, last } = sectionBars(markers, index, list[list.length - 1]?.number ?? marker.bar);
+  const looped = sectionLooped(project, index, list);
+  const name = escapeHtml(marker.name);
+  return `<div class="section-head" data-marker-bar="${marker.bar}">
+      <button class="section-jump" data-action="marker-jump" data-bar="${marker.bar}" aria-label="Jump to ${name}" title="Right-click or long-press to rename or delete">
+        <span class="section-name">${name}</span><span class="section-meta">${first === last ? `Bar ${first}` : `Bars ${first}–${last}`}</span>
+      </button>
+      <span class="section-line" aria-hidden="true"></span>
+      <button class="section-loop${looped ? " on" : ""}" data-action="marker-loop" data-bar="${marker.bar}" aria-pressed="${looped}" aria-label="Loop ${name}">${
+    icon("loop", 14)
+  }<span>${looped ? "Looping" : "Loop"}</span></button>
+    </div>`;
+}
+
+/** Whether the project's loop is on and is this marker's section. */
+export function sectionLooped(project: Project, index: number, list: readonly ChartBar[]): boolean {
+  const loop = project.loop;
+  if (!loop?.enabled) return false;
+  const region = sectionLoop(project.markers ?? [], index, list);
+  return region !== null && Math.abs(region.start - loop.start) < 0.01 && Math.abs(region.end - loop.end) < 0.01;
 }
 
 function barMarkup(bar: ChartBar, index: number, peaks: Float32Array | null, duration: number): string {

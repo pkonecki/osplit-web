@@ -31,6 +31,13 @@ export function stemLevel(project: Pick<Project, "volumes">, stem: Stem): number
 /** A mixer row: a stem, or the click track (once the beats are analysed). */
 export type Track = Stem | "click";
 
+/** A named point in the song: a bar of the beat grid, and its time (seconds). */
+export interface ProjectMarker {
+  bar: number;
+  time: number;
+  name: string;
+}
+
 /** A project's A–B loop in seconds; `enabled` false plays through it. */
 export interface ProjectLoop {
   start: number;
@@ -80,6 +87,8 @@ export interface Project {
   semitones?: number;
   /** A–B loop; missing when none is set. */
   loop?: ProjectLoop;
+  /** Markers (intro, verse, chorus…), sorted by bar. Missing = none. */
+  markers?: ProjectMarker[];
   /** Chords and key named as written (original) or as heard with the key shift. Missing = transposed. */
   chordNames?: "original" | "transposed";
   errorMessage: string | null;

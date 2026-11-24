@@ -28,8 +28,34 @@ import {
 import { state } from "./state";
 import { saveProject } from "./storage";
 import { analyzeProject, cachedAnalysis, projectGrid, saveGridEdits, saveKeyOverride } from "./tasks/analysis";
-import type { GridEdits, Project, Track } from "./types";
-import { barForCell, currentBar, segmentForCell, shownBars, updateChart, updateChartPlayhead } from "./view/chart";
+import type { GridEdits, Project, ProjectMarker, Track } from "./types";
+import {
+  addMarker,
+  MAX_MARKER_NAME,
+  removeMarker,
+  renameMarker,
+  sectionLoop,
+  snapMarkers,
+  stepMarker,
+} from "./markers";
+import { choiceDialog, textDialog } from "./view/dialog";
+import {
+  pendingMarkerBar,
+  prepareMarkerPanel,
+  stepPendingBar,
+  updateCurrentMarker,
+  updateMarkersView,
+  updateScrubMarkers,
+} from "./view/markers-view";
+import {
+  barForCell,
+  currentBar,
+  sectionLooped,
+  segmentForCell,
+  shownBars,
+  updateChart,
+  updateChartPlayhead,
+} from "./view/chart";
 import { chordNaming, keyText, parseKey, songKey, updateChordNow } from "./view/harmony";
 import { stemRowsMarkup, updateMixer } from "./view/mixer";
 import { isPanelName, openPanel, setPanel, updatePanels } from "./view/panels";
@@ -54,6 +80,8 @@ export function updatePracticeDisplay(current: Project): void {
   updateMixer(current);
   updateScrubLoop(current);
   updateChart(current);
+  updateMarkersView(current);
+  updateScrubMarkers(current);
   updateChordNow(current);
   updatePlayerDisplay(current);
   updateMeta(current);
@@ -87,6 +115,7 @@ export function practiceTick(): void {
   if (!current) return;
   updateChordNow(current);
   updateChartPlayhead(current.id);
+  updateCurrentMarker(current);
   followPlayback();
 }
 
@@ -119,6 +148,12 @@ export function refreshAnalysis(current: Project): void {
   const hasRow = document.querySelector('[data-stem-row="click"]') !== null;
   if (rows && hasRow !== (grid !== null)) rows.innerHTML = stemRowsMarkup(current);
   updatePracticeDisplay(current);
+  // Markers follow the music when the grid changes (bar 1 moved, tempo ×2).
+  const markers = current.markers;
+  if (markers?.length && shownBars().length) {
+    const snapped = snapMarkers(markers, shownBars());
+    if (snapped !== markers) void saveMarkers(current, [...snapped]).catch(console.warn);
+  }
 }
 
 /** Plays (`play` true) or pauses the project player. */
@@ -288,6 +323,74 @@ async function saveMix(updated: Project): Promise<void> {
   if (state.selectedProject === updated) state.selectedProject = saved;
 }
 
+/** Saves the project's markers and shows them. */
+async function saveMarkers(current: Project, markers: ProjectMarker[]): Promise<void> {
+  const updated: Project = { ...current, markers: markers.length ? markers : undefined };
+  state.selectedProject = updated;
+  updatePracticeDisplay(updated);
+  const saved = await saveProject(updated);
+  if (state.selectedProject === updated) state.selectedProject = saved;
+}
+
+function markerByBar(current: Project, bar: number): number {
+  return (current.markers ?? []).findIndex((marker) => marker.bar === bar);
+}
+
+/** Loops a marker's section, or turns the loop off if it is that section already. */
+function loopSection(current: Project, index: number): Promise<void> {
+  const region = sectionLoop(current.markers ?? [], index, shownBars());
+  if (!region) return Promise.resolve();
+  if (sectionLooped(current, index, shownBars())) {
+    return savePractice({ ...current, loop: { ...current.loop!, enabled: false } });
+  }
+  seekTo(region.start);
+  return savePractice({ ...current, loop: { ...region, enabled: true } });
+}
+
+function jumpToMarker(current: Project, bar: number): void {
+  const start = shownBars().find((item) => item.number === bar)?.start;
+  const marker = (current.markers ?? []).find((item) => item.bar === bar);
+  seekTo(start ?? marker?.time ?? 0);
+}
+
+/** Saves the marker the Add marker panel describes. */
+async function saveNewMarker(current: Project): Promise<void> {
+  const bar = shownBars().find((item) => item.number === pendingMarkerBar());
+  if (!bar) return;
+  const name = document.querySelector<HTMLInputElement>("#marker-name")?.value ?? "";
+  setPanel(null);
+  await saveMarkers(current, addMarker(current.markers ?? [], { bar: bar.number, time: bar.start, name }));
+}
+
+/** Rename or delete a marker: from its heading's context menu or a long press. */
+async function markerMenu(bar: number): Promise<void> {
+  const current = project();
+  if (!current) return;
+  const marker = (current.markers ?? []).find((item) => item.bar === bar);
+  if (!marker) return;
+  const choice = await choiceDialog(marker.name, [
+    { value: "rename", label: "Rename" },
+    { value: "delete", label: "Delete" },
+  ]);
+  const latest = project();
+  if (!latest) return;
+  if (choice === "rename") {
+    const name = await textDialog("Rename marker", "Name", marker.name, MAX_MARKER_NAME);
+    if (name) await saveMarkers(latest, renameMarker(latest.markers ?? [], bar, name));
+  } else if (choice === "delete") {
+    await saveMarkers(latest, removeMarker(latest.markers ?? [], bar));
+  }
+}
+
+/** Shift+← / Shift+→: the previous or next marker. */
+function stepMarkers(current: Project, direction: -1 | 1): void {
+  const bar = currentBar();
+  if (!bar) return;
+  const atStart = playerTime().position - bar.start < 0.5;
+  const marker = stepMarker(current.markers ?? [], bar.number, direction, atStart);
+  if (marker) jumpToMarker(current, marker.bar);
+}
+
 /** Downloads the chord chart (txt) or .lab file, named as the page shows them. */
 function exportProjectChords(current: Project, format: string | undefined): void {
   const naming = chordNaming(current);
@@ -310,7 +413,11 @@ export async function handlePracticeClick(
   switch (action) {
     case "panel": {
       const name = button.dataset.panel;
-      if (isPanelName(name)) setPanel(openPanel() === name ? null : name);
+      if (!isPanelName(name)) return true;
+      const opening = openPanel() !== name;
+      if (opening && name === "marker") prepareMarkerPanel();
+      setPanel(opening ? name : null);
+      if (opening && name === "marker") document.querySelector<HTMLElement>("#marker-name")?.focus();
       return true;
     }
     case "panel-close":
@@ -344,6 +451,28 @@ export async function handlePracticeClick(
       if (chord) seekTo(chord.start);
       return true;
     }
+    case "marker-jump":
+      jumpToMarker(current, Number(button.dataset.bar));
+      return true;
+    case "marker-loop": {
+      const index = markerByBar(current, Number(button.dataset.bar));
+      if (index >= 0) await loopSection(current, index);
+      return true;
+    }
+    case "marker-bar":
+      stepPendingBar(Number(button.dataset.step));
+      return true;
+    case "marker-preset": {
+      const input = document.querySelector<HTMLInputElement>("#marker-name");
+      if (input) {
+        input.value = button.dataset.name ?? "";
+        input.focus();
+      }
+      return true;
+    }
+    case "marker-save":
+      await saveNewMarker(current);
+      return true;
     case "speed-step":
       await stepSpeed(current, Number(button.dataset.step));
       return true;
@@ -514,6 +643,12 @@ export async function handlePracticeChange(event: Event): Promise<boolean> {
  * a field, or used on a focused slider, button or menu, keep their meaning.
  */
 export async function handlePracticeKey(event: KeyboardEvent): Promise<void> {
+  const field = event.target as HTMLElement;
+  if (field.id === "marker-name" && event.key === "Enter" && project()) {
+    event.preventDefault();
+    await saveNewMarker(project()!);
+    return;
+  }
   if (event.key === "Escape" && openPanel()) {
     event.preventDefault();
     const opener = document.querySelector<HTMLElement>(`[data-action="panel"][data-panel="${openPanel()}"]`);
@@ -536,9 +671,17 @@ export async function handlePracticeKey(event: KeyboardEvent): Promise<void> {
       break;
     case "ArrowLeft":
     case "ArrowRight":
-      if (event.shiftKey) return;
       event.preventDefault();
-      stepBars(current, event.key === "ArrowLeft" ? -1 : 1);
+      if (event.shiftKey) stepMarkers(current, event.key === "ArrowLeft" ? -1 : 1);
+      else stepBars(current, event.key === "ArrowLeft" ? -1 : 1);
+      break;
+    case "m":
+    case "M":
+      if (!shownBars().length) return;
+      event.preventDefault();
+      prepareMarkerPanel();
+      setPanel("marker");
+      document.querySelector<HTMLElement>("#marker-name")?.focus();
       break;
     case "ArrowUp":
     case "ArrowDown":
@@ -563,6 +706,16 @@ let longPressed = false;
 
 export function installPracticeListeners(root: HTMLElement): void {
   root.addEventListener("pointerdown", (event) => {
+    const markerElement = (event.target as HTMLElement).closest<HTMLElement>("[data-marker-bar]");
+    if (markerElement && event.pointerType !== "mouse") {
+      longPressed = false;
+      clearTimeout(longPressTimer);
+      longPressTimer = window.setTimeout(() => {
+        longPressed = true;
+        void markerMenu(Number(markerElement.dataset.markerBar)).catch(console.warn);
+      }, 500);
+      return;
+    }
     const button = (event.target as HTMLElement).closest('[data-action="click-button"]');
     if (!button) return;
     longPressed = false;
@@ -573,9 +726,20 @@ export function installPracticeListeners(root: HTMLElement): void {
     }, 500);
   });
   for (const type of ["pointerup", "pointerleave", "pointercancel"]) {
-    root.addEventListener(type, () => clearTimeout(longPressTimer));
+    root.addEventListener(type, () => {
+      clearTimeout(longPressTimer);
+      // Only the click that ends the long press is swallowed.
+      if (longPressed) setTimeout(() => (longPressed = false), 400);
+    });
   }
   root.addEventListener("contextmenu", (event) => {
+    const markerElement = (event.target as HTMLElement).closest<HTMLElement>("[data-marker-bar]");
+    if (markerElement) {
+      event.preventDefault();
+      // A long press on a phone opens the menu itself.
+      if (!longPressed) void markerMenu(Number(markerElement.dataset.markerBar)).catch(console.warn);
+      return;
+    }
     if ((event.target as HTMLElement).closest('[data-action="click-button"]')) {
       event.preventDefault();
       setPanel("rhythm");
@@ -584,7 +748,8 @@ export function installPracticeListeners(root: HTMLElement): void {
   // A click outside an open popover closes it. The click that ends a long
   // press is swallowed: it would land on the sheet's backdrop.
   document.addEventListener("click", (event) => {
-    if (longPressed) {
+    // (Not one in a dialog the long press opened, outside the page.)
+    if (longPressed && root.contains(event.target as Node)) {
       longPressed = false;
       event.preventDefault();
       event.stopPropagation();
