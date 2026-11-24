@@ -106,7 +106,7 @@ function barsMarkup(list: ChartBar[], peaks: Float32Array | null, duration: numb
   });
   flush();
   return `<div class="chart-rows">${rows.join("")}</div>
-    <p class="chart-hint">Click a bar to jump to it. Shift-click a bar to loop from the bar playing to that one.</p>`;
+    <p class="chart-hint"><span class="hint-mouse">Click a bar to jump to it. Shift-click a bar to loop from the bar playing to that one.</span><span class="hint-touch">Tap a bar to jump to it. Long-press a bar, then drag, to loop over the bars.</span></p>`;
 }
 
 /** A marker's heading in the chart: jump to it, loop its section; right-click or long-press for more. */

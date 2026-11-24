@@ -760,7 +760,127 @@ export async function handlePracticeKey(event: KeyboardEvent): Promise<void> {
 let longPressTimer = 0;
 let longPressed = false;
 
+/**
+ * On a touch screen, a long press on a bar then a drag sets a loop over the
+ * bars covered; the chart shows it as the finger moves, and it is saved on
+ * release. A drag before the press is long enough scrolls as usual.
+ */
+const LOOP_PRESS_MS = 450;
+const LOOP_PRESS_SLOP = 10;
+let loopDrag: {
+  pointerId: number;
+  x: number;
+  y: number;
+  anchor: number;
+  last: number;
+  active: boolean;
+  timer: number;
+  classes: Map<HTMLElement, string>;
+} | null = null;
+
+function chartCells(): HTMLElement[] {
+  return [...document.querySelectorAll<HTMLElement>('#chord-chart .bar-cell[data-action="bar-seek"]')];
+}
+
+/** Marks the bars from the anchor to the bar under the finger as the loop to be. */
+function showLoopDrag(): void {
+  if (!loopDrag) return;
+  const first = Math.min(loopDrag.anchor, loopDrag.last);
+  const last = Math.max(loopDrag.anchor, loopDrag.last);
+  for (const cell of chartCells()) {
+    const index = Number(cell.dataset.index);
+    const inside = index >= first && index <= last;
+    cell.classList.remove("off");
+    cell.classList.toggle("in-loop", inside);
+    cell.classList.toggle("loop-start", index === first);
+    cell.classList.toggle("loop-end", index === last);
+    cell.classList.toggle("loop-dragging", inside);
+  }
+}
+
+function endLoopDrag(save: boolean): void {
+  const drag = loopDrag;
+  if (!drag) return;
+  loopDrag = null;
+  clearTimeout(drag.timer);
+  document.body.classList.remove("loop-drag");
+  if (!drag.active) return;
+  const current = project();
+  const cells = chartCells();
+  const from = barForCell(cells[Math.min(drag.anchor, drag.last)]);
+  const to = barForCell(cells[Math.max(drag.anchor, drag.last)]);
+  const region = save && current && from && to
+    ? normalizeLoop(from.start, to.end, playerTime().duration || to.end)
+    : null;
+  if (current && region) {
+    void savePractice({ ...current, loop: { ...region, enabled: true } }).catch(console.warn);
+    return;
+  }
+  // Cancelled: put the chart back as it was.
+  for (const [cell, className] of drag.classes) cell.className = className;
+}
+
+function installLoopDrag(root: HTMLElement): void {
+  root.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "mouse" || loopDrag) return;
+    const cell = (event.target as HTMLElement).closest<HTMLElement>('#chord-chart .bar-cell[data-action="bar-seek"]');
+    if (!cell) return;
+    const index = Number(cell.dataset.index);
+    const drag = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      anchor: index,
+      last: index,
+      active: false,
+      timer: 0,
+      classes: new Map(chartCells().map((c) => [c, c.className])),
+    };
+    drag.timer = window.setTimeout(() => {
+      drag.active = true;
+      document.body.classList.add("loop-drag");
+      navigator.vibrate?.(12);
+      showLoopDrag();
+    }, LOOP_PRESS_MS);
+    loopDrag = drag;
+  });
+  root.addEventListener("pointermove", (event) => {
+    const drag = loopDrag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    if (!drag.active) {
+      // Moving before the press is long enough is a scroll.
+      if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > LOOP_PRESS_SLOP) endLoopDrag(false);
+      return;
+    }
+    const cell = document.elementFromPoint(event.clientX, event.clientY)
+      ?.closest<HTMLElement>('#chord-chart .bar-cell[data-action="bar-seek"]');
+    if (!cell) return;
+    const index = Number(cell.dataset.index);
+    if (index === drag.last) return;
+    drag.last = index;
+    showLoopDrag();
+  });
+  root.addEventListener("pointerup", (event) => {
+    const drag = loopDrag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    // The click that ends the drag doesn't seek.
+    if (drag.active) {
+      longPressed = true;
+      setTimeout(() => (longPressed = false), 400);
+    }
+    endLoopDrag(true);
+  });
+  root.addEventListener("pointercancel", (event) => {
+    if (loopDrag && event.pointerId === loopDrag.pointerId) endLoopDrag(false);
+  });
+  // While dragging a loop, the finger doesn't scroll the page.
+  root.addEventListener("touchmove", (event) => {
+    if (loopDrag?.active) event.preventDefault();
+  }, { passive: false });
+}
+
 export function installPracticeListeners(root: HTMLElement): void {
+  installLoopDrag(root);
   root.addEventListener("pointerdown", (event) => {
     const markerElement = (event.target as HTMLElement).closest<HTMLElement>("[data-marker-bar]");
     if (markerElement && event.pointerType !== "mouse") {
@@ -789,6 +909,11 @@ export function installPracticeListeners(root: HTMLElement): void {
     });
   }
   root.addEventListener("contextmenu", (event) => {
+    // A long press on a bar starts a loop, not the browser's menu.
+    if ((event.target as HTMLElement).closest("#chord-chart .bar-cell") && (loopDrag || longPressed)) {
+      event.preventDefault();
+      return;
+    }
     const markerElement = (event.target as HTMLElement).closest<HTMLElement>("[data-marker-bar]");
     if (markerElement) {
       event.preventDefault();

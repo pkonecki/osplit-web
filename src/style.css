@@ -590,6 +590,14 @@ button.info-chip:hover { color: var(--text); }
 .bar-cell.segment small { position: relative; color: var(--text-3); font-size: 11px; }
 .segment-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: var(--space-1); }
 .chart-hint { margin: var(--space-3) 0 0 34px; color: var(--text-3); font-size: 12px; }
+.chart-hint .hint-touch { display: none; }
+@media (hover: none) {
+  .chart-hint .hint-mouse { display: none; }
+  .chart-hint .hint-touch { display: inline; }
+}
+/* A long press on a bar starts a loop: no text selection or callout. */
+#chord-chart .bar-cell { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+body.loop-drag { -webkit-user-select: none; user-select: none; }
 .chart-note { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-3); color: var(--text-2); font-size: 13px; }
 .chart-empty { margin-top: var(--space-6); padding: var(--space-8) var(--space-6); display: flex; flex-direction: column; align-items: center; gap: var(--space-2); border: 1px dashed var(--line-4); border-radius: var(--radius-l); text-align: center; }
 .chart-empty .button { margin-top: var(--space-2); }
@@ -740,7 +748,7 @@ button.info-chip:hover { color: var(--text); }
   .bar-cell { height: 58px; padding: 0 var(--space-2); }
   .bar-chord { font-size: 18px; }
   .bar-chord.split { font-size: 13px; gap: 6px; }
-  .chart-hint { display: none; }
+  .chart-hint { margin: var(--space-2) 0 0 22px; font-size: 11px; }
   .practice[data-tab="mixer"] .practice-main .practice-toolbar, .practice[data-tab="mixer"] .chord-chart { display: none; }
   .mixer-panel { display: none; flex: 1; border-left: 0; background: transparent; padding: var(--space-3) var(--space-4); }
   .practice[data-tab="mixer"] .mixer-panel { display: flex; }
