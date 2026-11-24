@@ -221,6 +221,8 @@ test("separates a clip and mixes the stems", async ({ page }) => {
   const starts = await page.evaluate(() => window.__starts);
   expect(starts).toHaveLength(5);
   expect(new Set(starts.map((start) => `${start.when}@${start.offset}`)).size).toBe(1);
+  // Storing the analysis also touches the project: wait for it first.
+  await expect.poll(async () => (await readStore(page, "analysis")).length, { timeout: 60_000 }).toBe(1);
   const slider = page.locator('[data-action="volume"][data-stem="vocals"]');
   await slider.scrollIntoViewIfNeeded();
   const box = (await slider.boundingBox())!;
