@@ -1,7 +1,9 @@
 import { expect, type Page, test } from "@playwright/test";
 import {
   addEmptyProject,
+  closePanel,
   createProjectWithClip,
+  openPanel,
   instrument,
   openApp,
   readStore,
@@ -148,7 +150,7 @@ test("removes the source after separation when asked; progress is accessible", a
     (await readStore<{ deleteSourceAfterSeparation?: boolean }>(page, "projects"))[0]
       .deleteSourceAfterSeparation
   ).toBe(true);
-  await expect(page.locator('[data-action="export-mix"]')).toBeVisible({
+  await expect(page.locator('[data-action="play"]')).toBeVisible({
     timeout: SEPARATION_TIMEOUT,
   });
 
@@ -158,8 +160,12 @@ test("removes the source after separation when asked; progress is accessible", a
   expect(values.length).toBeGreaterThan(3);
   expect(values).toEqual([...values].sort((a, b) => a - b));
 
+  // Splitting again needs the file.
+  await page.click('[data-action="project-menu"]');
+  await page.getByRole("button", { name: "Split again…" }).click();
   await expect(page.locator(".source-removed")).toContainText("Import it again");
   await expect(page.locator('[data-action="separate"]')).toHaveCount(0);
+  await page.click('[data-action="split-cancel"]');
   expect(await readStore(page, "sources")).toHaveLength(0);
   expect(await readStore(page, "stems")).toHaveLength(5);
   await page.click('[data-action="play"]');
@@ -195,14 +201,17 @@ test("declares install icons that exist at their sizes", async ({ page }) => {
 test("moves a project to another device in a project file", async ({ page, browser }, testInfo) => {
   await openApp(page);
   await separateClip(page, "Travelling song", clip);
+  await openPanel(page, "speed");
   await page.click('[data-action="speed-step"][data-step="-1"]');
+  await closePanel(page);
   // The analysis runs after separation; wait for it, so it travels too.
   await expect.poll(async () => (await readStore(page, "analysis")).length, {
     timeout: 60_000,
   }).toBe(1);
 
   const download = page.waitForEvent("download");
-  await page.click('.page-actions [data-action="export-project"]');
+  await page.click('[data-action="project-menu"]');
+  await page.getByRole("button", { name: "Save as project file" }).click();
   const file = await download;
   expect(file.suggestedFilename()).toBe("Travelling song.osplit");
   const path = testInfo.outputPath("Travelling song.osplit");

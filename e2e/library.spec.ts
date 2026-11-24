@@ -85,7 +85,7 @@ test("New split makes, opens and separates a project in one step", async ({ page
   await start.click();
 
   await expect(page.locator("h1")).toHaveText("Morning Song");
-  await expect(page.locator('[data-action="export-mix"]')).toBeVisible({ timeout: SEPARATION_TIMEOUT });
+  await expect(page.locator('[data-action="play"]')).toBeVisible({ timeout: SEPARATION_TIMEOUT });
   const [project] = await readStore<{ name: string; model: string; quality?: string }>(page, "projects");
   expect(project).toMatchObject({ name: "Morning Song", model: "spleeter-5" });
   expect(project.quality).toBeUndefined();
