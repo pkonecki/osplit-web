@@ -15,10 +15,19 @@ export function songKey(record: AnalysisRecord | null | undefined): MusicalKey |
   return record.key && record.key.confidence >= KEY_UNCLEAR ? record.key : null;
 }
 
-/** How the project's chords are named: as heard (with the key shift) unless set to original. */
+/**
+ * How the project's chords are named: as heard (with the key shift) unless
+ * set to original; with a capo, as the shapes played with it (the chord
+ * heard, transposed down by the capo).
+ */
 export function chordNaming(project: Project): ChordNaming {
   const record = cachedAnalysis(project.id);
-  const semitones = project.chordNames === "original" ? 0 : projectSemitones(project);
+  const capo = project.capo ?? 0;
+  const semitones = capo
+    ? projectSemitones(project) - capo
+    : project.chordNames === "original"
+    ? 0
+    : projectSemitones(project);
   // Spelled for the key even when it is unclear: the best guess beats none.
   const key = record?.keyOverride ?? record?.key ?? null;
   return { key: key ? transposeKey(key, semitones) : null, semitones };

@@ -15,10 +15,12 @@ import {
   projectSpeed,
 } from "../practice";
 import { analysisStatus, cachedAnalysis, projectGrid } from "../tasks/analysis";
+import { MAX_CAPO, mainChords, shapeName, suggestCapos } from "../capo";
 import {
   ALL_STEMS,
   type AnalysisRecord,
   DEFAULT_CLICK_VOLUME,
+  METRES,
   type Project,
   type Track,
   TRACK_LABELS,
@@ -34,8 +36,8 @@ import { icon } from "./icons";
  * place, so a slider being dragged keeps working.
  */
 
-export type PanelName = "speed" | "key" | "loop" | "rhythm" | "export" | "marker";
-const PANELS: PanelName[] = ["speed", "key", "loop", "rhythm", "export", "marker"];
+export type PanelName = "speed" | "key" | "loop" | "rhythm" | "export" | "marker" | "capo";
+const PANELS: PanelName[] = ["speed", "key", "loop", "rhythm", "export", "marker", "capo"];
 
 let open: PanelName | null = null;
 
@@ -195,9 +197,31 @@ export function rhythmPanel(project: Project): string {
       </div>
       <div class="field-group">
         <div class="field-row"><strong>Beats per measure</strong><span id="metre-detected" class="muted"></span></div>
-        <div class="preset-grid cols-6" role="group" aria-label="Beats per measure">
-          <button class="preset" data-action="tempo-metre" data-beats="3" aria-pressed="false">3/4</button>
-          <button class="preset" data-action="tempo-metre" data-beats="4" aria-pressed="false">4/4</button>
+        <div class="preset-grid cols-6" role="group" aria-label="Beats per measure">${
+      METRES.map((metre) =>
+        `<button class="preset" data-action="tempo-metre" data-beats="${metre.beats}" data-unit="${metre.unit}" aria-pressed="false">${metre.beats}/${metre.unit}</button>`
+      ).join("")
+    }</div>
+        <div class="beat-cells" id="beat-cells" aria-hidden="true"></div>
+      </div>
+      <label class="switch-row compact">
+        <span><strong>Accent beat 1</strong><small>Higher click on the first beat of each measure</small></span>
+        <input type="checkbox" role="switch" class="switch" data-action="click-accent" ${project.clickAccent !== false ? "checked" : ""} />
+      </label>
+      <div class="two-columns">
+        <div class="field-group"><strong>Subdivision</strong>
+          <div class="preset-grid cols-2" role="group" aria-label="Subdivision">${
+      ([[1, "Off"], [2, "8ths"], [3, "Triplets"], [4, "16ths"]] as const).map(([value, label]) =>
+        `<button class="preset" data-action="click-sub" data-sub="${value}" aria-pressed="false">${label}</button>`
+      ).join("")
+    }</div>
+        </div>
+        <div class="field-group"><strong>Count-in</strong>
+          <div class="preset-grid cols-1" role="group" aria-label="Count-in">${
+      ([[0, "Off"], [1, "1 bar"], [2, "2 bars"]] as const).map(([value, label]) =>
+        `<button class="preset" data-action="count-in" data-bars="${value}" aria-pressed="false">${label}</button>`
+      ).join("")
+    }</div>
         </div>
       </div>
       <div class="field-row bar-start">
@@ -206,6 +230,65 @@ export function rhythmPanel(project: Project): string {
         <button class="step-button" data-action="tempo-downbeat" data-step="1" aria-label="Bars start a beat later">›</button>
       </div>`,
   );
+}
+
+export function capoPanel(): string {
+  return panel(
+    "capo",
+    "Capo",
+    `
+      <div class="stepper">
+        <button class="step-button big" data-action="capo-step" data-step="-1" aria-label="Capo one fret lower">−</button>
+        <div class="stepper-value" aria-live="polite"><output id="capo-value" class="big-value">0</output><span id="capo-unit" class="muted"></span></div>
+        <button class="step-button big" data-action="capo-step" data-step="1" aria-label="Capo one fret higher">+</button>
+      </div>
+      <div class="field-group">
+        <div class="field-row"><span class="muted">You play</span><span class="muted">It sounds as</span></div>
+        <div class="capo-pairs" id="capo-pairs"></div>
+      </div>
+      <div class="field-group"><strong>Easiest shapes</strong><div class="capo-suggestions" id="capo-suggestions"></div></div>
+      <p class="panel-note">Only the chord names change, to the shapes you play with the capo on. The audio stays the same.</p>`,
+    `<button class="text-action" data-action="capo-reset">Reset</button>`,
+  );
+}
+
+function updateCapo(project: Project, record: AnalysisRecord | null | undefined): void {
+  const capo = project.capo ?? 0;
+  setText("#capo-value", capo ? String(capo) : "No capo");
+  setText("#capo-unit", capo ? `fret ${capo}` : "Chords as they sound");
+  setText("#capo-chip-value", capo ? String(capo) : "Off");
+  const chip = document.querySelector<HTMLElement>("#capo-chip");
+  if (chip) {
+    chip.hidden = capo === 0;
+    chip.textContent = `Capo ${capo}`;
+  }
+  setDisabled('[data-action="capo-step"][data-step="-1"]', capo <= 0);
+  setDisabled('[data-action="capo-step"][data-step="1"]', capo >= MAX_CAPO);
+  const main = mainChords(record?.chords ?? [], projectSemitones(project));
+  const pairs = document.querySelector<HTMLElement>("#capo-pairs");
+  if (pairs) {
+    const html = main.length
+      ? main.map((chord) =>
+        `<div class="capo-pair"><strong>${escapeHtml(shapeName(chord, capo))}</strong><small>${
+          escapeHtml(shapeName(chord, 0))
+        }</small></div>`
+      ).join("")
+      : `<p class="muted">The chords appear once they are detected.</p>`;
+    if (pairs.innerHTML !== html) pairs.innerHTML = html;
+  }
+  const suggestions = document.querySelector<HTMLElement>("#capo-suggestions");
+  if (suggestions) {
+    const html = main.length
+      ? suggestCapos(main).map(({ capo: fret, share }) =>
+        `<button class="capo-suggestion${fret === capo ? " on" : ""}" data-action="capo-set" data-capo="${fret}" aria-pressed="${
+          fret === capo
+        }"><strong>${fret ? `Capo ${fret}` : "No capo"}</strong><span>${
+          escapeHtml(main.map((chord) => shapeName(chord, fret)).join(" "))
+        }</span><small>${Math.round(share * 100)}% open</small></button>`
+      ).join("")
+      : "";
+    if (suggestions.innerHTML !== html) suggestions.innerHTML = html;
+  }
 }
 
 /** What the Export panel exports, and the stems picked (all by default). */
@@ -437,8 +520,9 @@ export function updatePanels(project: Project): void {
     button.disabled = !grid;
   }
 
-  // Rhythm.
+  // Rhythm and capo.
   updateRhythm(project, record, speed);
+  updateCapo(project, record);
 
   updateExport(project);
 }
@@ -501,7 +585,25 @@ function updateRhythm(project: Project, record: AnalysisRecord | null | undefine
   const tempo = grid ? `${formatTempo(grid.bpm, speed)}${grid.confidence < LOW_CONFIDENCE ? "?" : ""}` : "";
   setText("#tempo-bpm", grid ? formatTempo(grid.bpm, speed) : "—");
   setText("#tempo-chip", status.running ? `Analyzing… ${status.progress}%` : grid ? `${tempo} BPM` : record === undefined ? "…" : "No beat");
-  setText("#metre-chip", grid ? `${grid.beatsPerBar}/4` : "—");
+  setText("#metre-chip", grid ? `${grid.beatsPerBar}/${grid.beatUnit ?? 4}` : "—");
+  const cells = document.querySelector<HTMLElement>("#beat-cells");
+  if (cells) {
+    const accent = project.clickAccent !== false;
+    const html = grid
+      ? Array.from({ length: grid.beatsPerBar }, (_, i) => `<span class="${i === 0 && accent ? "accent" : ""}">${i + 1}</span>`).join("")
+      : "";
+    if (cells.innerHTML !== html) cells.innerHTML = html;
+  }
+  for (const button of document.querySelectorAll<HTMLElement>('[data-action="click-sub"]')) {
+    const on = Number(button.dataset.sub) === (project.clickSubdivision ?? 1);
+    button.setAttribute("aria-pressed", String(on));
+  }
+  for (const button of document.querySelectorAll<HTMLElement>('[data-action="count-in"]')) {
+    const on = Number(button.dataset.bars) === (project.countInBars ?? 0);
+    button.setAttribute("aria-pressed", String(on));
+  }
+  const accentSwitch = document.querySelector<HTMLInputElement>('[data-action="click-accent"]');
+  if (accentSwitch) accentSwitch.checked = project.clickAccent !== false;
   setText("#click-note", grid ? `Follows the beat grid · ${Math.round(grid.bpm * speed)} BPM` : "Needs a beat grid: tap the tempo");
   let note = "";
   if (status.running) note = `Analyzing… ${status.progress}%`;
@@ -523,7 +625,8 @@ function updateRhythm(project: Project, record: AnalysisRecord | null | undefine
   setDisabled('[data-action="analyze"]', status.running);
   setText("#metre-detected", record ? `Detected: ${record.beatsPerBar}/4` : "");
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-action="tempo-metre"]')) {
-    const pressed = grid?.beatsPerBar === Number(button.dataset.beats);
+    const pressed = grid?.beatsPerBar === Number(button.dataset.beats) &&
+      (grid?.beatUnit ?? 4) === Number(button.dataset.unit);
     button.setAttribute("aria-pressed", String(pressed));
     button.classList.toggle("on", pressed);
     button.disabled = !grid;

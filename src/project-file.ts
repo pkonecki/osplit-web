@@ -7,6 +7,7 @@ import {
   type ChordSegment,
   type GridEdits,
   type KeyEstimate,
+  METRES,
   MODEL_IDS,
   MODEL_STEMS,
   type Modulation,
@@ -347,6 +348,10 @@ function readProject(value: unknown): Project {
       .filter((item: { bar: number }, i: number, all: { bar: number }[]) => i === 0 || all[i - 1].bar !== item.bar);
     if (sorted.length) project.markers = sorted;
   }
+  if (typeof value.clickAccent === "boolean") project.clickAccent = value.clickAccent;
+  if ([1, 2, 3, 4].includes(value.clickSubdivision)) project.clickSubdivision = value.clickSubdivision;
+  if ([0, 1, 2].includes(value.countInBars)) project.countInBars = value.countInBars;
+  if (Number.isInteger(value.capo) && value.capo >= 0 && value.capo <= 11) project.capo = value.capo;
   if (value.chordNames === "original" || value.chordNames === "transposed") {
     project.chordNames = value.chordNames;
   }
@@ -371,6 +376,10 @@ function readEdits(value: unknown): GridEdits | undefined {
   if (isNumber(value.bpmFactor) && value.bpmFactor > 0) edits.bpmFactor = value.bpmFactor;
   if (Number.isInteger(value.downbeatShift)) edits.downbeatShift = value.downbeatShift;
   if (value.beatsPerBar === 3 || value.beatsPerBar === 4) edits.beatsPerBar = value.beatsPerBar;
+  if (isRecord(value.metre)) {
+    const metre = METRES.find((item) => item.beats === value.metre.beats && item.unit === value.metre.unit);
+    if (metre) edits.metre = { ...metre };
+  }
   if (
     isRecord(value.tapped) && isNumber(value.tapped.bpm) && value.tapped.bpm > 0 &&
     isNumber(value.tapped.anchor)

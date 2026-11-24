@@ -77,6 +77,14 @@ export interface Project {
   clickVolume?: number;
   /** The click is heard (it is muted until turned on). */
   clickOn?: boolean;
+  /** A higher click on each bar's first beat. Missing = true. */
+  clickAccent?: boolean;
+  /** Clicks between the beats. Missing = 1 (none). */
+  clickSubdivision?: ClickSubdivision;
+  /** Bars of click before playback starts, and before a loop restarts. Missing = 0. */
+  countInBars?: 0 | 1 | 2;
+  /** Capo fret (0–11): chords are named as the shapes played with it. Missing = 0. */
+  capo?: number;
   /** Delete the source audio once separation succeeds (saves space). */
   deleteSourceAfterSeparation?: boolean;
   /** The source audio was deleted after separation; re-import to separate. */
@@ -96,6 +104,25 @@ export interface Project {
 
 export type BeatsPerBar = 3 | 4;
 
+/** A time signature: beats a bar over the beat's note value (6/8: 6 over 8). */
+export interface Metre {
+  beats: number;
+  unit: 4 | 8;
+}
+
+/** The time signatures offered in Rhythm. */
+export const METRES: readonly Metre[] = [
+  { beats: 2, unit: 4 },
+  { beats: 3, unit: 4 },
+  { beats: 4, unit: 4 },
+  { beats: 5, unit: 4 },
+  { beats: 6, unit: 8 },
+  { beats: 7, unit: 8 },
+];
+
+/** Click subdivision: one click a beat, or 2 (8ths), 3 (triplets), 4 (16ths). */
+export type ClickSubdivision = 1 | 2 | 3 | 4;
+
 /** Corrections the user made to the detected beat grid. */
 export interface GridEdits {
   /** Tempo ×2 or ÷2 (beats inserted halfway, or every other one dropped). */
@@ -103,6 +130,11 @@ export interface GridEdits {
   /** Moves bar starts by this many beats. */
   downbeatShift?: number;
   beatsPerBar?: BeatsPerBar;
+  /**
+   * The time signature set by hand (2/4, 3/4, 4/4, 5/4, 6/8, 7/8): beats a
+   * bar and the beat's note value. Wins over `beatsPerBar`.
+   */
+  metre?: Metre;
   /** An even grid from tap tempo: the tempo, and a tap (track seconds) on a beat. */
   tapped?: { bpm: number; anchor: number };
 }

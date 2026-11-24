@@ -264,6 +264,13 @@ change.
   speed (for example "120 → 102 BPM" at 85%). The Rhythm panel corrects the
   grid: ×2 / ÷2, 3 or 4 beats per measure, bar 1 a beat earlier or later, tap
   the tempo, use the detected tempo again, or detect it again.
+- **Time signature:** 2/4, 3/4, 4/4, 5/4, 6/8 or 7/8, set in Rhythm
+  (detection finds 3/4 or 4/4); bar lines, bar loops and the click's accent
+  follow it.
+- **Click options:** *Accent beat 1* (on by default), a subdivision (8ths,
+  triplets or 16ths, softer), and a count-in of 1 or 2 bars: the click plays
+  them before the stems start, and again each time a loop goes back to its
+  start (the stems then pause for it).
 - **Click:** a click track on every beat, accented on bar starts, off by
   default. The click button in the player, the switch in Rhythm and the M of
   the Click row in the mixer are the same on/off, and Rhythm's volume is the
@@ -292,6 +299,12 @@ off still work.
   − / + or a grid of the twelve keys, sets the song's key yourself (or picks
   the second most likely key, often the relative major or minor), and has
   *Show chords in the new key*; off, the chords keep their original names.
+- **Capo:** the Capo chip names the chords as the shapes you play with a
+  capo on that fret (the chord heard, after any key shift, moved down by the
+  capo); the audio doesn't change. The panel lists the main chords as you
+  play them and as they sound, and suggests the three frets that make the
+  most of them open shapes (C, A, G, E, D, Am, Em, Dm). The header shows
+  "Capo 3", and the chord chart export uses the names shown.
 - **Chords now:** beside the chips, the chord at the playhead, large, and the
   next three.
 - **Export:** the chord chart (.txt) has four bars a line

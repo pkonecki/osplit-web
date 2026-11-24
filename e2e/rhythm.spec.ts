@@ -28,7 +28,7 @@ interface SavedAnalysis {
   bpmConfidence: number;
   beats: Float32Array;
   beatsPerBar: number;
-  edits?: { bpmFactor?: number; beatsPerBar?: number; downbeatShift?: number };
+  edits?: { bpmFactor?: number; beatsPerBar?: number; downbeatShift?: number; metre?: { beats: number; unit: number } };
 }
 
 interface SavedProject {
@@ -170,7 +170,7 @@ test("finds the tempo, plays the click and loops bars", async ({ page }) => {
   await page.click('[data-action="tempo-metre"][data-beats="3"]');
   await expect(page.locator('[data-action="tempo-metre"][data-beats="3"]'))
     .toHaveAttribute("aria-pressed", "true");
-  await expect.poll(async () => (await analysis(page)).edits?.beatsPerBar).toBe(3);
+  await expect.poll(async () => (await analysis(page)).edits?.metre).toEqual({ beats: 3, unit: 4 });
   await expect(page.locator("#metre-chip")).toHaveText("3/4");
   await page.click('[data-action="tempo-downbeat"][data-step="1"]');
   await expect(page.locator("#downbeat-label")).toHaveText("1 beat later than detected");

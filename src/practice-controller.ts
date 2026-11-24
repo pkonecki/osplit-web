@@ -28,7 +28,8 @@ import {
 import { state } from "./state";
 import { saveProject } from "./storage";
 import { analyzeProject, cachedAnalysis, projectGrid, saveGridEdits, saveKeyOverride } from "./tasks/analysis";
-import type { GridEdits, Project, ProjectMarker, Track } from "./types";
+import { type ClickSubdivision, type GridEdits, METRES, type Project, type ProjectMarker, type Track } from "./types";
+import { clampCapo } from "./capo";
 import {
   addMarker,
   MAX_MARKER_NAME,
@@ -100,12 +101,12 @@ export function updatePracticeDisplay(current: Project): void {
 function updateMeta(current: Project): void {
   const meta = document.querySelector<HTMLElement>("#practice-meta");
   if (!meta) return;
-  const text = ["#song-key-chip", "#tempo-chip", "#metre-chip"]
+  const parts = ["#song-key-chip", "#tempo-chip", "#metre-chip"]
     .map((selector) => document.querySelector(selector)?.textContent ?? "")
-    .filter((part) => part && part !== "—")
-    .join(" · ");
+    .filter((part) => part && part !== "—");
+  if (current.capo) parts.push(`Capo ${current.capo}`);
+  const text = parts.join(" · ");
   if (meta.textContent !== text) meta.textContent = text;
-  void current;
 }
 
 /** After the project page renders: the chart's peaks, the analysis, the display. */
@@ -301,6 +302,7 @@ async function tap(current: Project): Promise<void> {
   const bpm = Math.round((heard / projectSpeed(current)) * 10) / 10;
   await editGrid(current, (edits) => ({
     beatsPerBar: edits.beatsPerBar,
+    metre: edits.metre,
     tapped: { bpm, anchor: playerTime().position },
   }));
 }
@@ -584,10 +586,28 @@ export async function handlePracticeClick(
       });
       return true;
     case "tempo-metre": {
-      const beatsPerBar = Number(button.dataset.beats) === 3 ? 3 : 4;
-      await editGrid(current, (edits) => ({ ...edits, beatsPerBar }));
+      const metre = METRES.find((item) =>
+        item.beats === Number(button.dataset.beats) && item.unit === Number(button.dataset.unit ?? 4)
+      );
+      if (!metre) return true;
+      await editGrid(current, (edits) => ({ ...edits, beatsPerBar: undefined, metre: { ...metre } }));
       return true;
     }
+    case "click-sub":
+      await savePractice({ ...current, clickSubdivision: Number(button.dataset.sub) as ClickSubdivision });
+      return true;
+    case "count-in":
+      await savePractice({ ...current, countInBars: Number(button.dataset.bars) as 0 | 1 | 2 });
+      return true;
+    case "capo-step":
+      await savePractice({ ...current, capo: clampCapo((current.capo ?? 0) + Number(button.dataset.step)) });
+      return true;
+    case "capo-set":
+      await savePractice({ ...current, capo: clampCapo(Number(button.dataset.capo)) });
+      return true;
+    case "capo-reset":
+      await savePractice({ ...current, capo: 0 });
+      return true;
     case "tempo-downbeat": {
       const step = Number(button.dataset.step);
       await editGrid(current, (edits) => ({ ...edits, downbeatShift: (edits.downbeatShift ?? 0) + step }));
@@ -654,6 +674,9 @@ export async function handlePracticeChange(event: Event): Promise<boolean> {
     }
     case "click-toggle":
       await toggleClick(current, target.checked);
+      return true;
+    case "click-accent":
+      await savePractice({ ...current, clickAccent: target.checked });
       return true;
     case "volume":
       state.selectedProject = await saveProject(current);

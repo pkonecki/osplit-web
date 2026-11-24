@@ -1,5 +1,12 @@
-import { clickSamples } from "../analysis/click";
-import { type BeatGrid, beatIndexAt, isDownbeat } from "../analysis/grid";
+import {
+  beatKind,
+  type ClickKind,
+  type ClickOptions,
+  clickSamples,
+  countInClicks,
+  DEFAULT_CLICK_OPTIONS,
+} from "../analysis/click";
+import { type BeatGrid, beatIndexAt } from "../analysis/grid";
 import type { LoopRegion } from "../practice";
 
 /** How often the scheduler runs while playing. */
@@ -24,10 +31,10 @@ export interface ClickTimeline {
   loop: LoopRegion | null;
 }
 
-/** A beat's click to schedule: when it is heard, and whether it is accented. */
+/** A click to schedule: when it is heard, and its sound. */
 export interface ScheduledClick {
   when: number;
-  accent: boolean;
+  kind: ClickKind;
 }
 
 /**
@@ -39,6 +46,7 @@ export function clicksAhead(
   timeline: ClickTimeline,
   now: number,
   horizon: number,
+  options: ClickOptions = DEFAULT_CLICK_OPTIONS,
 ): ScheduledClick[] {
   const clicks: ScheduledClick[] = [];
   const { rate, loop } = timeline;
@@ -49,15 +57,21 @@ export function clicksAhead(
     const end = loop && position < loop.end ? loop.end : timeline.duration;
     const span = Math.min(remaining, end - position);
     if (!(span > 0)) break;
-    let index = Math.max(0, beatIndexAt(grid, position - 1e-9) + 1);
+    // From the beat before, for its subdivisions after `position`.
+    let index = Math.max(0, beatIndexAt(grid, position - 1e-9));
     for (; index < grid.beats.length && grid.beats[index] < position + span; index++) {
       const beat = grid.beats[index];
-      if (beat < position) continue;
-      clicks.push({
-        when: now + elapsed + (beat - position) / rate,
-        accent: isDownbeat(grid, index),
-      });
+      const push = (time: number, kind: ClickKind) => {
+        if (time < position || time >= position + span) return;
+        clicks.push({ when: now + elapsed + (time - position) / rate, kind });
+      };
+      push(beat, beatKind(grid, index, options));
+      const next = grid.beats[index + 1] ?? beat + 60 / grid.bpm;
+      for (let part = 1; part < options.subdivision; part++) {
+        push(beat + ((next - beat) * part) / options.subdivision, "sub");
+      }
     }
+    clicks.sort((a, b) => a.when - b.when);
     remaining -= span;
     elapsed += span / rate;
     if (!loop || position + span < loop.end - 1e-9) break;
@@ -80,8 +94,9 @@ export class ClickScheduler {
   private readonly timeline: () => ClickTimeline;
   /** Created on first use, so a project that never clicks adds no nodes. */
   private gain: GainNode | null = null;
-  private buffers: { accent: AudioBuffer; normal: AudioBuffer } | null = null;
+  private buffers: Record<ClickKind, AudioBuffer> | null = null;
   private grid: BeatGrid | null = null;
+  private options: ClickOptions = DEFAULT_CLICK_OPTIONS;
   private level = 0;
   private timer: number | undefined;
   private holdUntil = 0;
@@ -101,6 +116,33 @@ export class ClickScheduler {
   setGrid(grid: BeatGrid | null): void {
     this.grid = grid;
     this.restart();
+  }
+
+  setOptions(options: ClickOptions): void {
+    if (options.accent === this.options.accent && options.subdivision === this.options.subdivision) return;
+    this.options = options;
+    this.restart();
+  }
+
+  /**
+   * Plays `bars` bars of count-in clicks from now, a beat every
+   * `beatSeconds`, whether or not the click is on. Returns when the count-in
+   * ends (audio-clock seconds).
+   */
+  countIn(bars: number, beatsPerBar: number, beatSeconds: number): number {
+    const output = this.output();
+    const start = this.context.currentTime + 0.05;
+    // Heard even when the click is muted, at a sensible level.
+    const gain = this.context.createGain();
+    gain.gain.value = this.level > 0 ? this.level : 0.8;
+    gain.connect(this.destination);
+    for (const click of countInClicks(beatsPerBar, beatSeconds, bars, start, this.options)) {
+      const source = new AudioBufferSourceNode(this.context, { buffer: output.buffers[click.kind] });
+      source.connect(gain);
+      source.start(click.when);
+      this.scheduled.push({ when: click.when, source });
+    }
+    return start + bars * beatsPerBar * beatSeconds;
   }
 
   setLevel(level: number): void {
@@ -151,11 +193,11 @@ export class ClickScheduler {
     if (now < this.holdUntil) return;
     const output = this.output();
     this.scheduled = this.scheduled.filter((click) => click.when > now - 0.1);
-    for (const click of clicksAhead(grid, timeline, now, LOOKAHEAD_SECONDS)) {
+    for (const click of clicksAhead(grid, timeline, now, LOOKAHEAD_SECONDS, this.options)) {
       if (click.when < now - LATE_SECONDS) continue;
       if (click.when < this.lastWhen + SAME_CLICK_SECONDS) continue;
       const source = new AudioBufferSourceNode(this.context, {
-        buffer: click.accent ? output.buffers.accent : output.buffers.normal,
+        buffer: output.buffers[click.kind],
       });
       source.connect(output.gain);
       source.start(Math.max(now, click.when));
@@ -164,15 +206,16 @@ export class ClickScheduler {
     }
   }
 
-  private output(): { gain: GainNode; buffers: { accent: AudioBuffer; normal: AudioBuffer } } {
+  private output(): { gain: GainNode; buffers: Record<ClickKind, AudioBuffer> } {
     if (!this.gain) {
       this.gain = this.context.createGain();
       this.gain.gain.value = this.level;
       this.gain.connect(this.destination);
     }
     this.buffers ??= {
-      accent: toBuffer(this.context, clickSamples(true, this.context.sampleRate)),
-      normal: toBuffer(this.context, clickSamples(false, this.context.sampleRate)),
+      accent: toBuffer(this.context, clickSamples("accent", this.context.sampleRate)),
+      beat: toBuffer(this.context, clickSamples("beat", this.context.sampleRate)),
+      sub: toBuffer(this.context, clickSamples("sub", this.context.sampleRate)),
     };
     return { gain: this.gain, buffers: this.buffers };
   }

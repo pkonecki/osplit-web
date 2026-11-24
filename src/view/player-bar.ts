@@ -1,5 +1,5 @@
 import { beatInBar } from "../analysis/chart";
-import { playerTime } from "../player";
+import { countingIn, playerTime } from "../player";
 import { projectGrid } from "../tasks/analysis";
 import type { Project } from "../types";
 import { currentBar } from "./chart";
@@ -94,12 +94,12 @@ export function updateScrubLoop(project: Project): void {
 
 function playGlyph(time: ReturnType<typeof playerTime>): string {
   if (!time.ready) return `<span class="loading-dots" aria-hidden="true">…</span>`;
-  return time.playing ? icon("pause", 24) : icon("play", 24);
+  return time.playing || countingIn() ? icon("pause", 24) : icon("play", 24);
 }
 
 function playLabel(time: ReturnType<typeof playerTime>): string {
   if (!time.ready) return "Loading stems";
-  return time.playing ? "Pause" : "Play";
+  return countingIn() ? "Stop the count-in" : time.playing ? "Pause" : "Play";
 }
 
 function setText(selector: string, text: string): void {
