@@ -1,6 +1,7 @@
 import { getProject, listProjects, readProjectData, storageEstimate, writeProjectData } from "../storage";
 import { formatBytes } from "../view/format";
 import { DAMAGED } from "../project-file";
+import type { CloudQuota } from "./store";
 import { DropboxStore, dropboxConfig } from "./dropbox";
 import {
   authorizedFetcher,
@@ -19,8 +20,11 @@ import {
   planSync,
   type RemoteProject,
   removeRemoteProject,
+  settleConflict,
+  type ConflictChoice,
   uploadProject,
 } from "./sync";
+export type { ConflictChoice };
 
 /**
  * Optional cloud sync of projects to the user's own Dropbox or OneDrive.
@@ -38,6 +42,9 @@ export const PROVIDER_LABELS: Record<ProviderId, string> = {
 
 const CONNECTION_KEY = "osplit-cloud-connection";
 const AUTO_SYNC_KEY = "osplit-cloud-auto-sync";
+/** Per project, the cloud copy's updatedAt when this device last synced it. */
+const SYNCED_KEY = "osplit-cloud-synced";
+const LAST_SYNC_KEY = "osplit-cloud-last-sync";
 
 interface Connection {
   provider: ProviderId;
@@ -73,7 +80,47 @@ export const cloud = {
   status: "",
   /** The cloud's projects as of the last sync, by id; null before one. */
   remote: null as Map<string, RemoteProject> | null,
+  /** Projects changed both here and in the cloud: the user chooses a version. */
+  conflicts: new Map<string, RemoteProject>(),
+  /** Projects going up or coming down now. */
+  transfers: new Map<string, "up" | "down">(),
+  /** The cloud account's storage, as of the last sync. */
+  quota: null as CloudQuota | null,
 };
+
+function syncedRecords(): Record<string, number> {
+  try {
+    const value = JSON.parse(localStorage.getItem(SYNCED_KEY) ?? "{}");
+    return value && typeof value === "object" ? value as Record<string, number> : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Records that this device and the cloud agree on the project as of `updatedAt`. */
+function recordSynced(id: string, updatedAt: number): void {
+  const records = syncedRecords();
+  records[id] = updatedAt;
+  localStorage.setItem(SYNCED_KEY, JSON.stringify(records));
+  cloud.conflicts.delete(id);
+}
+
+function forgetSynced(id: string): void {
+  const records = syncedRecords();
+  delete records[id];
+  localStorage.setItem(SYNCED_KEY, JSON.stringify(records));
+}
+
+/** When the last sync finished (ms), or null. */
+export function lastSync(): number | null {
+  const value = Number(localStorage.getItem(LAST_SYNC_KEY));
+  return value > 0 ? value : null;
+}
+
+/** What OSplit's projects take in the cloud, as of the last sync. */
+export function cloudUsage(): number {
+  return [...(cloud.remote?.values() ?? [])].reduce((sum, project) => sum + project.size, 0);
+}
 
 function loadConnection(): Connection | null {
   try {
@@ -188,7 +235,10 @@ export async function finishSignIn(): Promise<string | null> {
     account: previous?.provider === pending.provider ? previous.account : "",
     tokens,
   });
-  if (previous?.provider !== pending.provider) cloud.remote = null;
+  if (previous?.provider !== pending.provider) {
+    cloud.remote = null;
+    localStorage.removeItem(SYNCED_KEY);
+  }
   cloud.needsReconnect = false;
   cloud.status = "";
   try {
@@ -208,10 +258,14 @@ export async function disconnect(): Promise<void> {
     await (storeFor("dropbox") as DropboxStore).revoke().catch(() => {});
   }
   localStorage.removeItem(CONNECTION_KEY);
+  localStorage.removeItem(SYNCED_KEY);
+  localStorage.removeItem(LAST_SYNC_KEY);
   cloud.busy = false;
   cloud.needsReconnect = false;
   cloud.status = "";
   cloud.remote = null;
+  cloud.conflicts.clear();
+  cloud.quota = null;
 }
 
 function setStatus(text: string): void {
@@ -249,9 +303,10 @@ export interface SyncHooks {
 }
 
 /**
- * Syncs the projects with the cloud: uploads projects changed here, updates
- * projects changed elsewhere, and lists projects only in the cloud. Returns
- * a summary.
+ * Syncs the projects that are both here and in the cloud: uploads those
+ * changed here, updates those changed elsewhere, and sets aside those
+ * changed in both places for the user. Lists projects only in the cloud.
+ * Returns a summary.
  */
 export async function syncNow(hooks: SyncHooks): Promise<string> {
   if (cloud.busy) return "A sync is already running.";
@@ -260,7 +315,8 @@ export async function syncNow(hooks: SyncHooks): Promise<string> {
   try {
     setStatus(`Checking ${label}…`);
     const remote = await listRemoteProjects(store);
-    const plan = planSync(await listProjects(), remote);
+    const plan = planSync(await listProjects(), remote, syncedRecords());
+    cloud.quota = await store.quota().catch(() => null);
     const byId = new Map(remote.map((project) => [project.id, project]));
     const failed: string[] = [];
     let firstError = "";
@@ -283,6 +339,7 @@ export async function syncNow(hooks: SyncHooks): Promise<string> {
         const copy = await uploadProject(store, data, (done, total) =>
           setStatus(`Uploading "${data.project.name}" to ${label}…${percent(done, total)}`));
         byId.set(copy.id, copy);
+        recordSynced(copy.id, copy.updatedAt);
         uploaded++;
       });
     }
@@ -296,15 +353,32 @@ export async function syncNow(hooks: SyncHooks): Promise<string> {
         if ((await getProject(copy.id))?.status === "processing") return;
         hooks.replacing(copy.id);
         await writeProjectData(data, { keepUpdatedAt: true });
+        recordSynced(copy.id, copy.updatedAt);
         downloaded++;
       });
     }
     cloud.remote = byId;
     cloud.needsReconnect = false;
+    cloud.conflicts = new Map(plan.conflicts.map((copy) => [copy.id, copy]));
+    // Projects already the same in both places (synced before records
+    // were kept) agree as of now.
+    const records = syncedRecords();
+    for (const project of await listProjects()) {
+      const copy = byId.get(project.id);
+      if (copy && copy.updatedAt === project.updatedAt && records[project.id] === undefined) {
+        recordSynced(project.id, copy.updatedAt);
+      }
+    }
+    localStorage.setItem(LAST_SYNC_KEY, String(Date.now()));
     const parts = [];
     if (uploaded) parts.push(`${uploaded} uploaded`);
     if (downloaded) parts.push(`${downloaded} updated from ${label}`);
     let summary = parts.length ? `Synced with ${label}: ${parts.join(", ")}.` : `Up to date with ${label}.`;
+    if (plan.conflicts.length) {
+      summary += ` ${plan.conflicts.length} project${plan.conflicts.length === 1 ? "" : "s"} changed in two places need${
+        plan.conflicts.length === 1 ? "s" : ""
+      } you.`;
+    }
     if (failed.length) summary += ` Couldn't sync ${failed.map((name) => `"${name}"`).join(", ")}: ${firstError}`;
     setStatus(summary);
     return summary;
@@ -327,13 +401,14 @@ export async function remoteOnlyProjects(): Promise<RemoteProject[]> {
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-/** Downloads a project that is only in the cloud. Returns its name. */
+/** Downloads a project from the cloud (only there, or changed there). Returns its name. */
 export async function downloadRemote(id: string, hooks: SyncHooks): Promise<string> {
   if (cloud.busy) throw new Error("Wait for the sync to finish.");
   const { store, label } = connectedStore();
   const copy = cloud.remote?.get(id);
   if (!copy) throw new Error("That project is no longer in the cloud. Sync again.");
   cloud.busy = true;
+  cloud.transfers.set(id, "down");
   try {
     const local = await readProjectData(id);
     if (local?.project.status === "processing") {
@@ -344,6 +419,7 @@ export async function downloadRemote(id: string, hooks: SyncHooks): Promise<stri
       setStatus(`Downloading "${copy.name}" from ${label}…${percent(done, total)}`));
     hooks.replacing(id);
     await writeProjectData(data, { keepUpdatedAt: true });
+    recordSynced(id, copy.updatedAt);
     setStatus(`Downloaded "${copy.name}".`);
     return copy.name;
   } catch (error) {
@@ -353,7 +429,91 @@ export async function downloadRemote(id: string, hooks: SyncHooks): Promise<stri
     throw new Error(message);
   } finally {
     cloud.busy = false;
+    cloud.transfers.delete(id);
   }
+}
+
+/**
+ * Uploads one project, replacing its copy in the cloud if any: the manual
+ * upload, and "Add to the cloud when done". From then on it syncs.
+ */
+export async function uploadLocal(id: string): Promise<string> {
+  if (cloud.busy) throw new Error("Wait for the sync to finish.");
+  const { store, label } = connectedStore();
+  cloud.busy = true;
+  cloud.transfers.set(id, "up");
+  try {
+    const data = await readProjectData(id);
+    if (!data) throw new Error("That project no longer exists.");
+    if (data.project.status === "processing") throw new Error("Wait for the split to finish.");
+    const copy = await uploadProject(store, data, (done, total) =>
+      setStatus(`Uploading "${data.project.name}" to ${label}…${percent(done, total)}`));
+    cloud.remote ??= new Map();
+    cloud.remote.set(copy.id, copy);
+    recordSynced(copy.id, copy.updatedAt);
+    setStatus(`Uploaded "${data.project.name}" to ${label}.`);
+    return data.project.name;
+  } catch (error) {
+    if (error instanceof ReconnectNeeded) cloud.needsReconnect = true;
+    const message = cloudMessage(error, label);
+    setStatus(message);
+    throw new Error(message);
+  } finally {
+    cloud.busy = false;
+    cloud.transfers.delete(id);
+  }
+}
+
+/**
+ * Settles a project changed both here and in the cloud: keep this
+ * device's version (upload it), the cloud's (download it), or both (the
+ * cloud's comes down as a new project, "… (other device)", and this one goes
+ * up). Returns a message.
+ */
+export async function resolveConflict(id: string, choice: ConflictChoice, hooks: SyncHooks): Promise<string> {
+  if (cloud.busy) throw new Error("Wait for the sync to finish.");
+  const { store, label } = connectedStore();
+  const local = await readProjectData(id);
+  if (!local) throw new Error("That project no longer exists.");
+  if (local.project.status === "processing") throw new Error("Wait for the split to finish.");
+  cloud.busy = true;
+  cloud.transfers.set(id, choice === "cloud" ? "down" : "up");
+  try {
+    const { write, uploaded } = await settleConflict(store, choice, local, (done, total) =>
+      setStatus(`Syncing "${local.project.name}" with ${label}…${percent(done, total)}`));
+    for (const data of write) {
+      if (data.project.id === id) hooks.replacing(id);
+      await writeProjectData(data, { keepUpdatedAt: data.project.id === id });
+    }
+    const copy = uploaded ?? cloud.remote?.get(id) ?? cloud.conflicts.get(id);
+    if (uploaded) {
+      cloud.remote ??= new Map();
+      cloud.remote.set(id, uploaded);
+    }
+    if (copy) recordSynced(id, copy.updatedAt);
+    const name = local.project.name;
+    const message = choice === "here"
+      ? `Kept this device's version of "${name}".`
+      : choice === "cloud"
+      ? `Kept the ${label} version of "${name}".`
+      : `Kept both: "${name} (other device)" is the ${label} version.`;
+    setStatus(message);
+    return message;
+  } catch (error) {
+    if (error instanceof ReconnectNeeded) cloud.needsReconnect = true;
+    const message = cloudMessage(error, label);
+    setStatus(message);
+    throw new Error(message);
+  } finally {
+    cloud.busy = false;
+    cloud.transfers.delete(id);
+  }
+}
+
+/** Forgets a project's sync record, when its copy here is deleted (it stays in the cloud). */
+export function forgetLocalCopy(id: string): void {
+  forgetSynced(id);
+  cloud.conflicts.delete(id);
 }
 
 /** Removes a project from the cloud (this device's copy stays). */
@@ -364,6 +524,8 @@ export async function removeRemote(id: string): Promise<void> {
   try {
     await removeRemoteProject(store, id);
     cloud.remote?.delete(id);
+    forgetSynced(id);
+    cloud.conflicts.delete(id);
   } catch (error) {
     if (error instanceof ReconnectNeeded) cloud.needsReconnect = true;
     throw new Error(cloudMessage(error, label));
@@ -377,9 +539,15 @@ export function inCloud(id: string): boolean {
   return cloud.remote?.has(id) ?? false;
 }
 
-/** The project's sync state as of the last sync, for its card. */
-export function cloudState(id: string, updatedAt: number): "synced" | "changed" | "local" | null {
-  if (!cloud.remote || !loadConnection()) return null;
+export type CloudState = "synced" | "changed" | "conflict" | "local" | "uploading" | "downloading";
+
+/** The project's sync state as of the last sync, for its row. */
+export function cloudState(id: string, updatedAt: number): CloudState | null {
+  if (!loadConnection()) return null;
+  const transfer = cloud.transfers.get(id);
+  if (transfer) return transfer === "up" ? "uploading" : "downloading";
+  if (!cloud.remote) return null;
+  if (cloud.conflicts.has(id)) return "conflict";
   const copy = cloud.remote.get(id);
   if (!copy) return "local";
   return copy.updatedAt === updatedAt ? "synced" : "changed";

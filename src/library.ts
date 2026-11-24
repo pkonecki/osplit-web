@@ -48,7 +48,7 @@ export function sortProjects(
 }
 
 /** What a library row shows about a project's state. */
-export type ProjectKind = "ready" | "busy" | "interrupted" | "failed" | "empty";
+export type ProjectKind = "ready" | "busy" | "interrupted" | "failed" | "empty" | "cloud";
 
 export function projectKind(project: Project): ProjectKind {
   if (project.status === "processing") return "busy";
@@ -68,8 +68,9 @@ export const LIBRARY_FILTERS: { id: LibraryFilter; label: string }[] = [
 
 export function matchesFilter(kind: ProjectKind, filter: LibraryFilter): boolean {
   if (filter === "all") return true;
-  if (filter === "ready") return kind === "ready";
-  return kind !== "ready";
+  // A project only in the cloud is a finished one, there to download.
+  if (filter === "ready") return kind === "ready" || kind === "cloud";
+  return kind !== "ready" && kind !== "cloud";
 }
 
 /** Case- and accent-insensitive match of every word of `query` in `text`. */

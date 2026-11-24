@@ -37,6 +37,8 @@ describe("library", () => {
     expect(matchesFilter("busy", "ready")).toBe(false);
     expect(matchesFilter("interrupted", "unfinished")).toBe(true);
     expect(matchesFilter("ready", "unfinished")).toBe(false);
+    expect(matchesFilter("cloud", "ready")).toBe(true);
+    expect(matchesFilter("cloud", "unfinished")).toBe(false);
   });
 
   it("searches every word, ignoring case and accents", () => {

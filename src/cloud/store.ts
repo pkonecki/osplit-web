@@ -21,6 +21,13 @@ export interface CloudStore {
   write(path: string, data: Blob, progress?: (sent: number) => void): Promise<void>;
   /** Removes a file or a folder with all it holds; nothing if it is gone. */
   remove(path: string): Promise<void>;
+  /** The account's storage: bytes used and in all; null if unknown. */
+  quota?(): Promise<CloudQuota | null>;
+}
+
+export interface CloudQuota {
+  used: number;
+  total: number;
 }
 
 /** An error for a failed request, with the service's own message if any. */

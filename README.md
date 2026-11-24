@@ -46,6 +46,7 @@ with the cross-origin isolation headers, like nginx, and one under
 `/osplit-web/` served without them, like GitHub Pages:
 
 ```bash
+export VITE_DROPBOX_APP_KEY=e2e-test-key
 deno task build
 BASE_PATH=/osplit-web/ deno task build --outDir dist-pages
 npx playwright install chromium
@@ -53,7 +54,10 @@ npx playwright test
 ```
 
 They separate a short generated clip with the real models, so the first run
-takes a minute or two. CI runs both suites on every pull request.
+takes a minute or two. CI runs both suites on every pull request. The
+Dropbox app key makes the builds offer cloud sync: `e2e/cloud.spec.ts` tests
+it against a Dropbox answered in memory (`e2e/fake-dropbox.ts`), so nothing
+reaches Dropbox.
 
 `e2e/csp.spec.ts` runs separately, against the Docker image, and fails on any
 Content-Security-Policy violation. CI runs it after building the image; run it
@@ -144,18 +148,34 @@ for an update rather than importing partly.
 
 ### Cloud sync (Dropbox, OneDrive)
 
-Optionally, projects sync to the user's own Dropbox or OneDrive. The panel
-appears only in builds made with an app id (below). **Connect Dropbox** or
-**Connect OneDrive** signs in on the provider's page and comes back; OSplit
-then sees only its own app folder there (`Apps/<app name>/`).
+Optionally, projects sync to the user's own Dropbox or OneDrive (there is no
+OSplit account or server). Cloud sync appears only in builds made with an
+app id (below). In **Settings**, **Connect Dropbox** or **Connect OneDrive**
+signs in on the provider's page and comes back; OSplit then sees only its
+own app folder there (`Apps/<app name>/`). Settings then shows the account,
+the cloud storage used and free (and OSplit's share), **Sync automatically**,
+**Sync now** and the last sync.
 
-- **Sync now** uploads projects changed on this device and updates projects
-  changed on another one: the most recent change wins. With **Sync
-  automatically** (on by default) a sync also runs when the app opens and
-  when you leave a project.
-- Projects that are only in the cloud are listed under *In Dropbox, not on
-  this device*, to **Download** when wanted, so a sync doesn't fill a phone's
-  storage. Deleting a project here asks whether to delete its cloud copy too.
+- **What syncs:** only projects that are both on this device and in the
+  cloud. **Sync now** uploads those changed here and updates those changed
+  on another device. With **Sync automatically** (on by default) a sync also
+  runs when the app opens and when you leave a project.
+- **Upload and download are manual:** a project only on this device shows
+  **Upload** in the library; a project only in the cloud is listed with
+  **Download**, so a sync neither fills the cloud nor a phone's storage. New
+  split has **Add to the cloud when done**, which uploads the project once
+  the split and analysis finish, even with automatic sync off.
+- **Remove from this device** (in a project's ⋯ menu) deletes the copy here
+  and keeps the one in the cloud. Deleting a project in both places asks
+  whether to delete its cloud copy too.
+- **Changed in two places:** each device remembers the cloud copy it last
+  synced with. A project changed both here and elsewhere since then is shown
+  with a warning and **Resolve**, and sync leaves it alone until you keep
+  this device's version, the cloud's, or both (the cloud's then comes down
+  as a second project, "… (other device)").
+- The library shows each project's state: in both places, changed and not
+  synced yet, changed in two places, this device only, cloud only,
+  uploading, downloading.
 - Projects being separated sync after they finish. Models are never
   uploaded.
 - Each project is a folder: `project.json` (the project file manifest, plus
@@ -175,6 +195,7 @@ and build with its id (these are public ids, not secrets):
 
 - **Dropbox** ([App Console](https://www.dropbox.com/developers/apps)):
   Scoped access, *App folder*. Under Permissions enable
+  `account_info.read` (the account name and storage used),
   `files.metadata.read`, `files.content.read` and `files.content.write`.
   Under OAuth 2 add the site URL (with its trailing slash, e.g.
   `https://example.com/` or `https://user.github.io/osplit-web/`) as a

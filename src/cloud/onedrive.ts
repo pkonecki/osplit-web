@@ -1,5 +1,5 @@
 import { type Fetcher, type OAuthConfig, withRetry } from "./oauth";
-import { type CloudEntry, type CloudStore, forEachChunk, requestError } from "./store";
+import { type CloudEntry, type CloudQuota, type CloudStore, forEachChunk, requestError } from "./store";
 
 /**
  * OneDrive, through Microsoft Graph with the Files.ReadWrite.AppFolder
@@ -115,6 +115,15 @@ export class OneDriveStore implements CloudStore {
     const response = await this.fetcher(itemUrl(path), { method: "DELETE" });
     if (response.status === 404 || response.ok) return;
     throw await requestError("OneDrive", response);
+  }
+
+  /** The drive's quota (GET /me/drive); null if unknown. */
+  async quota(): Promise<CloudQuota | null> {
+    const response = await this.fetcher(`${GRAPH}/me/drive?$select=quota`);
+    if (!response.ok) throw await requestError("OneDrive", response);
+    const body = await response.json() as { quota?: { used?: number; total?: number } };
+    const { used, total } = body.quota ?? {};
+    return typeof used === "number" && typeof total === "number" && total > 0 ? { used, total } : null;
   }
 
   /** The drive owner's name, to show which account is connected. */

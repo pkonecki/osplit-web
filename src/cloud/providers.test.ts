@@ -199,6 +199,12 @@ function plain(respond: (call: Call) => Response | Promise<Response>) {
 }
 
 describe("Dropbox", () => {
+  it("reads the space used and allocated", async () => {
+    const { fetcher, calls } = plain(() => json({ used: 300, allocation: { ".tag": "individual", allocated: 2000 } }));
+    expect(await new DropboxStore(fetcher).quota()).toEqual({ used: 300, total: 2000 });
+    expect(calls[0].url).toBe("https://api.dropboxapi.com/2/users/get_space_usage");
+  });
+
   it("escapes non-ASCII characters in the argument header", () => {
     expect(apiArg({ path: "/é" })).toBe('{"path":"/\\u00e9"}');
   });
@@ -290,6 +296,14 @@ describe("OneDrive", () => {
     ]);
     expect(calls[0].url).toBe(`${root}:/projects/x%20y:/children?$select=name,size,folder&$top=1000`);
     expect(await store.list("missing")).toEqual([]);
+  });
+
+  it("reads the drive's quota", async () => {
+    const { fetcher, calls } = plain(() => json({ quota: { used: 50, total: 1000, remaining: 950 } }));
+    expect(await new OneDriveStore(fetcher).quota()).toEqual({ used: 50, total: 1000 });
+    expect(calls[0].url).toBe("https://graph.microsoft.com/v1.0/me/drive?$select=quota");
+    const empty = plain(() => json({}));
+    expect(await new OneDriveStore(empty.fetcher).quota()).toBeNull();
   });
 
   it("reads a file through its download URL, without the token", async () => {

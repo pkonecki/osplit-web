@@ -14,7 +14,8 @@ import {
 import { state } from "../state";
 import { getAnalysis, getPeaks, storageEstimate } from "../storage";
 import { MODEL_STEMS, type Project, projectModel } from "../types";
-import { cloudNote, cloudPanelMarkup } from "./cloud";
+import { remoteRowMarkup, syncIcon, syncLineMarkup, syncState } from "./cloud";
+import { cloud, remoteOnlyProjects } from "../cloud/cloud";
 import { fileInputMarkup, messageMarkup } from "./detail";
 import { escapeHtml, formatBytes } from "./format";
 import { songKey } from "./harmony";
@@ -32,6 +33,8 @@ export async function renderProjects(): Promise<string> {
   const cloud = connection();
   const projects = sortProjects(state.projects, openedTimes());
   const rows = await Promise.all(projects.map(projectRow));
+  // Projects only in the cloud, to download.
+  rows.push(...(await remoteOnlyProjects()).map(remoteRowMarkup));
   const disabled = state.working ? "disabled" : "";
   const storage = estimate?.usage !== undefined
     ? `${formatBytes(estimate.usage)}${estimate.quota ? ` of ${formatBytes(estimate.quota)}` : ""}`
@@ -76,6 +79,7 @@ export async function renderProjects(): Promise<string> {
           }">${filter.label}</button>`
         ).join("")
       }</div>
+        ${syncLineMarkup()}
         ${
         storage
           ? `<span class="library-storage" title="Browser storage used by OSplit">${
@@ -86,9 +90,8 @@ export async function renderProjects(): Promise<string> {
       </div>`
       : ""
   }
-      ${await cloudPanelMarkup()}
       ${
-    projects.length
+    rows.length
       ? `<section class="project-list" aria-label="Projects">${rows.join("")}</section>
          <p class="no-results muted" hidden>No projects match.</p>`
       : emptyLibraryMarkup()
@@ -168,6 +171,7 @@ const STATUS_TEXT: Record<ProjectKind, string> = {
   interrupted: "Interrupted",
   failed: "Failed",
   empty: "Empty",
+  cloud: "In the cloud only",
 };
 
 async function projectRow(project: Project): Promise<string> {
@@ -188,7 +192,7 @@ async function projectRow(project: Project): Promise<string> {
   if (kind === "empty" && project.sourceName) status = "Not split yet";
   const source = project.sourceName ?? "No audio yet";
   const when = relativeTime(openedTimes()[project.id] ?? project.updatedAt);
-  const sync = cloudNote(project).replace(/^ · /, "");
+  const sync = syncState(project);
   const action = kind === "interrupted" || kind === "failed"
     ? `<button class="button small" data-action="resume" data-id="${id}" ${
       state.working || !project.sourceName || project.sourceRemoved ? "disabled" : ""
@@ -211,12 +215,19 @@ async function projectRow(project: Project): Promise<string> {
   }</span>
         <span class="project-summary">
           <strong>${name}</strong>
-          <small>${escapeHtml(source)} · ${escapeHtml(when)}${sync ? ` · ${escapeHtml(sync)}` : ""}</small>
+          <small>${escapeHtml(source)} · ${escapeHtml(when)}</small>
           <small class="mobile-meta">${escapeHtml([modelText === "—" ? "" : modelText, extras.music].filter(Boolean).join(" · "))}</small>
         </span>
       </button>
       <span class="project-model">${escapeHtml(modelText)}</span>
       <span class="project-music">${escapeHtml(extras.music || "—")}</span>
+      ${
+    sync
+      ? `<span class="project-sync sync-${sync.state}" title="${escapeHtml(sync.label)}">${syncIcon(sync.state)}<span>${
+        escapeHtml(sync.label)
+      }</span></span>`
+      : ""
+  }
       <span class="project-status">
         <span class="status-text">${escapeHtml(status)}</span>
         ${
@@ -229,12 +240,28 @@ async function projectRow(project: Project): Promise<string> {
       </span>
       <span class="project-actions">
         ${action}
+        ${syncActions(project, sync?.state ?? null, name, id)}
         <button class="icon-button row-menu" data-action="project-menu" data-id="${id}" aria-haspopup="menu" aria-expanded="false" aria-label="More actions for ${name}">${
     icon("more", 20)
   }</button>
       </span>
     </article>
   `;
+}
+
+/** Upload, Download or Resolve on a row, by its sync state. */
+function syncActions(project: Project, state: string | null, name: string, id: string): string {
+  const busy = cloud.busy ? "disabled" : "";
+  const ready = project.completedStems.length > 0 && project.status !== "processing";
+  if (state === "conflict") {
+    return `<button class="button small danger-line" data-action="cloud-resolve" data-id="${id}" ${busy} aria-label="Resolve ${name}">Resolve</button>`;
+  }
+  if (state === "local" && ready) {
+    return `<button class="button small with-icon" data-action="cloud-upload" data-id="${id}" ${busy} aria-label="Upload ${name} to the cloud">${
+      icon("upload", 16)
+    }Upload</button>`;
+  }
+  return "";
 }
 
 /** Shows only the rows matching the search and filter, in place. */

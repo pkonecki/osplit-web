@@ -7,6 +7,7 @@ import {
   planSync,
   type RemoteProject,
   removeRemoteProject,
+  settleConflict,
   sha256,
   uploadProject,
 } from "./sync";
@@ -151,6 +152,49 @@ describe("cloud sync", () => {
   });
 });
 
+describe("settling a project changed in two places", () => {
+  /** A project in the cloud as another device left it, and this device's other change. */
+  async function changedTwice() {
+    const store = new MemoryStore();
+    const theirs = projectData("a");
+    theirs.project.name = "Their name";
+    theirs.project.updatedAt = 3_000;
+    await uploadProject(store, theirs);
+    const mine: ProjectData = {
+      ...theirs,
+      project: { ...theirs.project, name: "My name", volumes: { vocals: 0.1 }, updatedAt: 2_000 },
+    };
+    return { store, theirs, mine };
+  }
+
+  it("keeps this device's version: it replaces the cloud's", async () => {
+    const { store, mine } = await changedTwice();
+    const { write, uploaded } = await settleConflict(store, "here", mine);
+    expect(write).toEqual([]);
+    expect(uploaded?.name).toBe("My name");
+    expect((await listRemoteProjects(store))[0].name).toBe("My name");
+  });
+
+  it("keeps the cloud's version: it comes down to replace this one", async () => {
+    const { store, mine } = await changedTwice();
+    const { write, uploaded } = await settleConflict(store, "cloud", mine);
+    expect(uploaded).toBeNull();
+    expect(write).toHaveLength(1);
+    expect(write[0].project).toMatchObject({ id: mine.project.id, name: "Their name", updatedAt: 3_000 });
+    expect((await listRemoteProjects(store))[0].name).toBe("Their name");
+  });
+
+  it("keeps both: the cloud's as a new project here, this one in the cloud", async () => {
+    const { store, mine } = await changedTwice();
+    const { write, uploaded } = await settleConflict(store, "both", mine);
+    expect(write).toHaveLength(1);
+    expect(write[0].project.id).not.toBe(mine.project.id);
+    expect(write[0].project.name).toBe("Their name (other device)");
+    expect(write[0].stems.vocals).toBeDefined();
+    expect(uploaded?.name).toBe("My name");
+  });
+});
+
 describe("planSync", () => {
   const local = (id: string, updatedAt: number, status: Project["status"] = "ready"): Project => ({
     ...newProject(id),
@@ -167,13 +211,29 @@ describe("planSync", () => {
     size: 10,
   });
 
-  it("lets the newest copy win and lists projects only in the cloud", () => {
+  it("syncs only projects in both places, newest winning without a record", () => {
     const plan = planSync(
       [local("new", 1), local("mine", 5), local("theirs", 1), local("same", 3), local("busy", 9, "processing")],
       [remote("mine", 2), remote("theirs", 4), remote("same", 3), remote("busy", 1), remote("away", 7), remote("older", 2)],
     );
-    expect(plan.upload.map((project) => project.id)).toEqual(["new", "mine"]);
+    // A project only on this device isn't uploaded: that is manual.
+    expect(plan.upload.map((project) => project.id)).toEqual(["mine"]);
+    expect(plan.localOnly.map((project) => project.id)).toEqual(["new"]);
     expect(plan.download.map((project) => project.id)).toEqual(["theirs"]);
     expect(plan.remoteOnly.map((project) => project.id)).toEqual(["away", "older"]);
+    expect(plan.conflicts).toEqual([]);
+  });
+
+  it("sends the side changed since the last sync, and lists changes on both sides", () => {
+    const syncedAt = { here: 10, there: 10, both: 10, neither: 10 };
+    const plan = planSync(
+      [local("here", 20), local("there", 10), local("both", 20), local("neither", 10)],
+      [remote("here", 10), remote("there", 15), remote("both", 30), remote("neither", 10)],
+      syncedAt,
+    );
+    expect(plan.upload.map((project) => project.id)).toEqual(["here"]);
+    expect(plan.download.map((project) => project.id)).toEqual(["there"]);
+    // Changed on both: even though the cloud copy is newer, the user chooses.
+    expect(plan.conflicts.map((project) => project.id)).toEqual(["both"]);
   });
 });

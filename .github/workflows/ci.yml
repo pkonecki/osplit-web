@@ -88,7 +88,11 @@ jobs:
 
       # Two builds: at the root (served with the isolation headers, like
       # nginx) and under /osplit-web/ (served without them, like GitHub Pages).
+      # A Dropbox app key, so the cloud sync UI is there to test against a
+      # fake Dropbox (e2e/fake-dropbox.ts); nothing reaches Dropbox.
       - name: Build both variants
+        env:
+          VITE_DROPBOX_APP_KEY: e2e-test-key
         run: |
           deno task build
           BASE_PATH=/osplit-web/ deno task build --outDir dist-pages
