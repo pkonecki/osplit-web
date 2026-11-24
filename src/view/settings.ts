@@ -8,6 +8,7 @@ import { MODEL_STEMS, type ModelId } from "../types";
 import { gpuStatusText, messageMarkup, fileInputMarkup } from "./detail";
 import { formatBytes } from "./format";
 import { footerMarkup, pageHeader } from "./shell";
+import { cloudSettingsMarkup } from "./cloud";
 
 /**
  * Settings: storage on this device, the separation models (download or
@@ -56,6 +57,7 @@ export async function renderSettings(): Promise<string> {
         <p class="muted">Downloaded the first time you use them. Delete one to free space; it downloads again when you next split with it.</p>
         <div class="model-rows">${MODELS.map((model, index) => modelRow(model, statuses[index])).join("")}</div>
       </section>
+      ${cloudSettingsMarkup()}
       <section class="card settings-section" aria-labelledby="settings-device">
         <h2 id="settings-device">This device</h2>
         <p class="status-line"><span class="status-dot ${gpu.webgpu ? "ok" : "off"}" aria-hidden="true"></span>${

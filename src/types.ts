@@ -83,6 +83,8 @@ export interface Project {
   clickSubdivision?: ClickSubdivision;
   /** Bars of click before playback starts, and before a loop restarts. Missing = 0. */
   countInBars?: 0 | 1 | 2;
+  /** Upload to the connected cloud once the split and analysis finish ("Add to the cloud when done"). */
+  cloudUploadPending?: boolean;
   /** Capo fret (0–11): chords are named as the shapes played with it. Missing = 0. */
   capo?: number;
   /** Delete the source audio once separation succeeds (saves space). */

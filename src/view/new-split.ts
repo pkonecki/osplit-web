@@ -10,6 +10,8 @@ export interface NewSplitRequest {
   name: string;
   model: ModelId;
   source: { file: File } | { url: string };
+  /** Upload to the connected cloud once the split and analysis finish. */
+  addToCloud: boolean;
 }
 
 const MODELS: { id: ModelId; title: string; description: string }[] = [
@@ -22,7 +24,7 @@ const MODELS: { id: ModelId; title: string; description: string }[] = [
  * behind it don't close it), optionally with a file already chosen. Resolves
  * the request when the user starts the split, or null when they cancel.
  */
-export function openNewSplit(initialFile?: File): Promise<NewSplitRequest | null> {
+export function openNewSplit(initialFile?: File, cloudLabel = ""): Promise<NewSplitRequest | null> {
   const gpu = knownGpu();
   let file: File | null = initialFile ?? null;
   let sourceKind: "file" | "url" = "file";
@@ -90,6 +92,14 @@ export function openNewSplit(initialFile?: File): Promise<NewSplitRequest | null
     }).join("")
   }</div>
         </section>
+        ${
+    cloudLabel
+      ? `<label class="switch-row add-to-cloud">
+          <span><strong>Add to the cloud when done</strong><small>Uploads it to your ${cloudLabel} when the split finishes. From then on it stays in sync.</small></span>
+          <input type="checkbox" role="switch" class="switch" data-add-to-cloud checked />
+        </label>`
+      : ""
+  }
       </div>
       <div class="sheet-foot">
         <span class="device-note"><span class="dot" aria-hidden="true"></span>Runs on this device · the model downloads once</span>
@@ -201,6 +211,7 @@ export function openNewSplit(initialFile?: File): Promise<NewSplitRequest | null
         name,
         model,
         source: sourceKind === "file" && file ? { file } : { url: urlInput.value.trim() },
+        addToCloud: dialog.querySelector<HTMLInputElement>("[data-add-to-cloud]")?.checked === true,
       });
     }, { once: true });
     dialog.showModal();

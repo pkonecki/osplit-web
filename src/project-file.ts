@@ -269,11 +269,11 @@ export async function readProjectParts(
 }
 
 /** A copy of imported data under a new id, to keep both projects. */
-export function asCopy(data: ProjectData): ProjectData {
+export function asCopy(data: ProjectData, suffix = "copy"): ProjectData {
   const id = crypto.randomUUID();
   return {
     ...data,
-    project: { ...data.project, id, name: `${data.project.name} (copy)`.slice(0, 80) },
+    project: { ...data.project, id, name: `${data.project.name} (${suffix})`.slice(0, 80) },
     source: data.source && { ...data.source, id },
     analysis: data.analysis && { ...data.analysis, projectId: id },
   };

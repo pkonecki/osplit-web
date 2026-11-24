@@ -1,5 +1,5 @@
 import type { Fetcher, OAuthConfig } from "./oauth";
-import { type CloudEntry, type CloudStore, forEachChunk, requestError } from "./store";
+import { type CloudEntry, type CloudQuota, type CloudStore, forEachChunk, requestError } from "./store";
 
 /**
  * Dropbox, through an app with "App folder" access: the app sees only
@@ -146,6 +146,16 @@ export class DropboxStore implements CloudStore {
     if (!response.ok) throw await requestError("Dropbox", response);
     const body = await response.json() as { name?: { display_name?: string }; email?: string };
     return body.name?.display_name ?? body.email ?? "";
+  }
+
+  /** Space used and allocated (users/get_space_usage); null if unknown. */
+  async quota(): Promise<CloudQuota | null> {
+    const response = await this.fetcher(`${API}/users/get_space_usage`, { method: "POST" });
+    if (!response.ok) throw await requestError("Dropbox", response);
+    const body = await response.json() as { used?: number; allocation?: { allocated?: number } };
+    const used = body.used;
+    const total = body.allocation?.allocated;
+    return typeof used === "number" && typeof total === "number" && total > 0 ? { used, total } : null;
   }
 
   /** Revokes the access token, on disconnect. */

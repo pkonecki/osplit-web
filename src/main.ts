@@ -7,8 +7,13 @@ import {
   disconnect as disconnectCloud,
   downloadRemote,
   finishSignIn,
+  cloud,
+  cloudState,
+  forgetLocalCopy,
   inCloud,
   removeRemote,
+  resolveConflict,
+  uploadLocal,
   setAutoSync,
   syncNow,
 } from "./cloud/cloud";
@@ -44,7 +49,7 @@ import {
   writeProjectData,
 } from "./storage";
 import { heldTaskLocks, taskLockName, withTaskLock } from "./task-lock";
-import { forgetAnalysis, loadAnalysis, onAnalysisChange } from "./tasks/analysis";
+import { analysisStatus, forgetAnalysis, loadAnalysis, onAnalysisChange } from "./tasks/analysis";
 import {
   cancelSeparation,
   separateProject,
@@ -69,6 +74,7 @@ import { type ModelId, newProject, type Project } from "./types";
 import { renderDetail, setSetupOpen } from "./view/detail";
 import { choiceDialog, confirmDialog, textDialog } from "./view/dialog";
 import { type MenuItem, openMenu } from "./view/menu";
+import { conflictDialog } from "./view/cloud";
 import { setPanel } from "./view/panels";
 import { captureForm, restoreForm } from "./view/form-state";
 import { describeError, escapeHtml, formatBytes } from "./view/format";
@@ -113,7 +119,27 @@ onAnalysisChange((projectId) => {
   if (state.selectedProject?.id === projectId && renderedView?.startsWith("project:")) {
     refreshAnalysis(state.selectedProject);
   }
+  void uploadWhenDone(projectId).catch(showError);
 });
+
+/**
+ * "Add to the cloud when done": once a project's split and analysis have
+ * finished, upload it (even with automatic sync off); from then on it
+ * syncs like any other.
+ */
+async function uploadWhenDone(id: string): Promise<void> {
+  const project = await getProject(id);
+  if (!project?.cloudUploadPending || !cloudConnection()) return;
+  if (project.status !== "ready" || !project.completedStems.length || analysisStatus(id).running) return;
+  if (cloud.busy) {
+    // Try again when the running sync or transfer is done.
+    window.setTimeout(() => void uploadWhenDone(id).catch(showError), 3000);
+    return;
+  }
+  const updated = await patchProject(id, { cloudUploadPending: undefined });
+  if (state.selectedProject?.id === id) state.selectedProject = updated;
+  await uploadToCloud(id);
+}
 installWakeLock();
 void start();
 
@@ -271,12 +297,12 @@ const cloudHooks = {
 async function runCloudSync(manual: boolean): Promise<void> {
   cloudReplaced.clear();
   const rerender = () =>
-    renderedView === "projects" ||
+    renderedView === "projects" || renderedView === "settings" ||
     (state.selectedProject !== null && cloudReplaced.has(state.selectedProject.id));
   try {
     // The sync marks itself busy at once: show that.
     const sync = syncNow(cloudHooks);
-    if (renderedView === "projects") await render();
+    if (renderedView === "projects" || renderedView === "settings") await render();
     const summary = await sync;
     if (manual) state.screenMessage = summary;
   } catch (error) {
@@ -413,17 +439,17 @@ async function handleClick(event: Event): Promise<void> {
         }
         break;
       }
+      case "cloud-upload":
+        if (id) await uploadToCloud(id);
+        break;
+      case "cloud-resolve":
+        if (id) await resolveProject(id);
+        break;
+      case "remote-menu":
+        if (id) await remoteMenu(id, button);
+        break;
       case "cloud-download":
-        if (id) {
-          try {
-            const download = downloadRemote(id, cloudHooks);
-            await render();
-            const name = await download;
-            state.screenMessage = `Downloaded "${name}".`;
-          } finally {
-            await render();
-          }
-        }
+        if (id) await downloadFromCloud(id);
         break;
       case "cloud-remove": {
         const cloud = cloudConnection();
@@ -557,9 +583,12 @@ async function newSplit(file?: File): Promise<void> {
     throw new Error("Wait for the current task or cancel it before starting another split.");
   }
   if (newSplitOpen()) return;
-  const request = await openNewSplit(file);
+  const request = await openNewSplit(file, cloudConnection()?.label ?? "");
   if (!request) return;
-  let project = await saveProject(newProject(request.name, request.model));
+  let project = await saveProject({
+    ...newProject(request.name, request.model),
+    ...(request.addToCloud ? { cloudUploadPending: true } : {}),
+  });
   if ("file" in request.source) {
     project = await replaceSource(project, request.source.file, request.source.file.name);
   }
@@ -591,6 +620,93 @@ async function leaveProject(page: "library" | "settings"): Promise<void> {
   if (wasOpen && cloudConnection() && autoSync()) void runCloudSync(false);
 }
 
+/** Uploads one project, showing it going up. */
+async function uploadToCloud(id: string): Promise<void> {
+  try {
+    const upload = uploadLocal(id);
+    await render();
+    state.screenMessage = `Uploaded "${await upload}".`;
+  } finally {
+    await render();
+  }
+}
+
+/** Downloads one project from the cloud, showing it coming down. */
+async function downloadFromCloud(id: string): Promise<void> {
+  try {
+    const download = downloadRemote(id, cloudHooks);
+    await render();
+    state.screenMessage = `Downloaded "${await download}".`;
+  } finally {
+    await render();
+  }
+}
+
+/** Asks which version to keep of a project changed in two places, and keeps it. */
+async function resolveProject(id: string): Promise<void> {
+  const project = await getProject(id);
+  const copy = cloud.conflicts.get(id);
+  const label = cloudConnection()?.label ?? "the cloud";
+  if (!project || !copy) throw new Error("That project no longer needs a choice. Sync again.");
+  const choice = await conflictDialog(project.name, label, project.updatedAt, copy.updatedAt);
+  if (!choice) return;
+  try {
+    const settling = resolveConflict(id, choice, cloudHooks);
+    await render();
+    state.screenMessage = await settling;
+  } finally {
+    await render();
+  }
+}
+
+/** The menu of a project only in the cloud: download it, or delete it there. */
+async function remoteMenu(id: string, anchor: HTMLElement): Promise<void> {
+  const copy = cloud.remote?.get(id);
+  const label = cloudConnection()?.label ?? "the cloud";
+  if (!copy) throw new Error("That project is no longer in the cloud. Sync again.");
+  const choice = await openMenu(anchor, copy.name, [
+    { value: "download", label: "Download to this device", sub: copy.size ? `${formatBytes(copy.size)}` : undefined },
+    { value: "delete", label: `Delete from ${label}`, danger: true },
+  ]);
+  if (choice === "download") {
+    await downloadFromCloud(id);
+  } else if (choice === "delete") {
+    if (
+      await confirmDialog(`Delete "${copy.name}" from ${label}? It isn't on this device, so it will be gone.`, "Delete")
+    ) {
+      await removeRemote(id);
+      await render();
+    }
+  }
+}
+
+/** Deletes this device's copy of a project that is also in the cloud. */
+async function removeFromDevice(id: string): Promise<void> {
+  const project = await getProject(id);
+  const label = cloudConnection()?.label ?? "the cloud";
+  if (!project) return;
+  if (state.working && state.taskProjectId === id) throw new Error("Cancel the split first.");
+  if (cloudState(id, project.updatedAt) !== "synced") {
+    throw new Error(`Sync "${project.name}" first: this device has changes ${label} doesn't.`);
+  }
+  if (
+    !await confirmDialog(
+      `Remove "${project.name}" from this device? It stays in ${label}, to download again.`,
+      "Remove from this device",
+    )
+  ) return;
+  await deleteProject(id);
+  forgetAnalysis(id);
+  forgetOpened(id);
+  forgetLocalCopy(id);
+  if (state.selectedProject?.id === id) {
+    state.selectedProject = null;
+    state.page = "library";
+  }
+  state.screenMessage = `Removed "${project.name}" from this device. It is still in ${label}.`;
+  await render();
+}
+
 /** Deletes a project after asking (and, if it is in the cloud, where). */
 async function deleteWithConfirmation(id: string): Promise<void> {
   if ((state.working && state.taskProjectId === id) || (await getProject(id))?.status === "processing") {
@@ -620,6 +736,7 @@ async function deleteWithConfirmation(id: string): Promise<void> {
     await deleteProject(id);
     forgetAnalysis(id);
     forgetOpened(id);
+    forgetLocalCopy(id);
     if (state.selectedProject?.id === id) state.selectedProject = null;
     await render();
   }
@@ -642,7 +759,16 @@ async function projectMenu(id: string, anchor: HTMLElement): Promise<void> {
   }
   if (onPage && ready) items.push({ value: "export", label: "Export…", sub: "Stems, mix or chords" });
   if (onPage && ready) items.push({ value: "split", label: "Split again…", sub: "Another model, or new audio" });
-  items.push({ value: "delete", label: "Delete", danger: true });
+  const sync = cloudConnection() ? cloudState(id, project.updatedAt) : null;
+  const label = cloudConnection()?.label ?? "the cloud";
+  if (sync === "conflict") items.unshift({ value: "resolve", label: "Resolve…", sub: `Changed on this device and in ${label}` });
+  if (sync === "local" && ready) {
+    items.push({ value: "upload", label: `Upload to ${label}`, sub: "Then open it on your other devices" });
+  }
+  if (sync === "synced") {
+    items.push({ value: "remove-local", label: "Remove from this device", sub: `Frees space here · stays in ${label}` });
+  }
+  items.push({ value: "delete", label: sync && sync !== "local" ? "Delete…" : "Delete", danger: true });
   const choice = await openMenu(anchor, project.name, items);
   switch (choice) {
     case "open":
@@ -670,6 +796,15 @@ async function projectMenu(id: string, anchor: HTMLElement): Promise<void> {
       break;
     case "delete":
       await deleteWithConfirmation(id);
+      break;
+    case "resolve":
+      await resolveProject(id);
+      break;
+    case "upload":
+      await uploadToCloud(id);
+      break;
+    case "remove-local":
+      await removeFromDevice(id);
       break;
   }
 }

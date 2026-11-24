@@ -1,4 +1,5 @@
 import {
+  asCopy,
   checkManifest,
   DAMAGED,
   type Manifest,
@@ -219,6 +220,28 @@ export async function downloadProject(
   return data;
 }
 
+/** How to settle a project changed both here and in the cloud. */
+export type ConflictChoice = "here" | "cloud" | "both";
+
+/**
+ * Settles a project changed in two places. "here": this device's version
+ * replaces the cloud's. "cloud": the cloud's comes down to replace this
+ * one's. "both": the cloud's comes down as a new project named "…
+ * (other device)", and this device's goes up. Returns the projects to write
+ * here, and the new cloud copy if one was uploaded.
+ */
+export async function settleConflict(
+  store: CloudStore,
+  choice: ConflictChoice,
+  local: ProjectData,
+  progress?: Progress,
+): Promise<{ write: ProjectData[]; uploaded: RemoteProject | null }> {
+  const id = local.project.id;
+  if (choice === "cloud") return { write: [await downloadProject(store, id, local, progress)], uploaded: null };
+  const write = choice === "both" ? [asCopy(await downloadProject(store, id, local, progress), "other device")] : [];
+  return { write, uploaded: await uploadProject(store, local, progress) };
+}
+
 /** Removes a project from the cloud. */
 export function removeRemoteProject(store: CloudStore, id: string): Promise<void> {
   return store.remove(projectFolder(id));
@@ -227,25 +250,47 @@ export function removeRemoteProject(store: CloudStore, id: string): Promise<void
 export interface SyncPlan {
   upload: Project[];
   download: RemoteProject[];
+  /** Changed both here and in the cloud since they last synced: the user chooses. */
+  conflicts: RemoteProject[];
   /** Projects in the cloud that aren't on this device. */
   remoteOnly: RemoteProject[];
+  /** Projects only on this device: uploaded only when the user asks. */
+  localOnly: Project[];
 }
 
 /**
- * What a sync does: the newest copy of each project wins. Projects being
- * separated wait for the next sync. Projects only in the cloud are listed
- * to download on request, so a sync doesn't fill this device's storage, and
- * a project deleted here stays in the cloud until removed there.
+ * What a sync does, for projects both on this device and in the cloud: the
+ * copy changed since they last synced goes the other way. `syncedAt` holds,
+ * per project, the cloud copy's `updatedAt` when this device last synced it.
+ * When both changed since then, the project is a conflict and waits for the
+ * user. Without a record (synced before records were kept), the newest copy
+ * wins. Projects being separated wait for the next sync.
+ *
+ * Projects only on this device are not uploaded, and projects only in the
+ * cloud are not downloaded: both stay manual, so a sync neither fills the
+ * cloud nor this device's storage.
  */
-export function planSync(local: Project[], remote: RemoteProject[]): SyncPlan {
+export function planSync(
+  local: Project[],
+  remote: RemoteProject[],
+  syncedAt: Readonly<Record<string, number>> = {},
+): SyncPlan {
   const remoteById = new Map(remote.map((project) => [project.id, project]));
-  const plan: SyncPlan = { upload: [], download: [], remoteOnly: [] };
+  const plan: SyncPlan = { upload: [], download: [], conflicts: [], remoteOnly: [], localOnly: [] };
   for (const project of local) {
     const copy = remoteById.get(project.id);
     remoteById.delete(project.id);
+    if (!copy) {
+      plan.localOnly.push(project);
+      continue;
+    }
     if (project.status === "processing") continue;
-    if (!copy || project.updatedAt > copy.updatedAt) plan.upload.push(project);
-    else if (copy.updatedAt > project.updatedAt) plan.download.push(copy);
+    const base = syncedAt[project.id];
+    const localChanged = base === undefined ? project.updatedAt > copy.updatedAt : project.updatedAt > base;
+    const cloudChanged = base === undefined ? copy.updatedAt > project.updatedAt : copy.updatedAt > base;
+    if (localChanged && cloudChanged) plan.conflicts.push(copy);
+    else if (localChanged) plan.upload.push(project);
+    else if (cloudChanged) plan.download.push(copy);
   }
   plan.remoteOnly = [...remoteById.values()].sort((a, b) => b.updatedAt - a.updatedAt);
   return plan;
