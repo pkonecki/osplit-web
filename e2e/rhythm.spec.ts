@@ -155,6 +155,13 @@ test("finds the tempo, plays the click and loops bars", async ({ page }) => {
   loop = (await project(page)).loop!;
   expect(loop.end - loop.start).toBeGreaterThan(5.8);
   expect(loop.end - loop.start).toBeLessThan(6.2);
+  // The chart marks the three looped bars, faintly once the loop is off.
+  await expect(page.locator(".bar-cell.in-loop")).toHaveCount(3);
+  await expect(cells.nth(0)).toHaveClass(/loop-start/);
+  await expect(cells.nth(2)).toHaveClass(/loop-end/);
+  await page.keyboard.press("l");
+  await expect.poll(async () => (await project(page)).loop?.enabled).toBe(false);
+  await expect(page.locator(".bar-cell.in-loop.off")).toHaveCount(3);
 
   // Corrections: ×2, ÷2, beats per bar; saved with the analysis.
   await page.locator("#tempo-chip").click();

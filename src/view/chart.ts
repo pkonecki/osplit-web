@@ -83,6 +83,7 @@ export function updateChart(project: Project): void {
 
 function barsMarkup(list: ChartBar[], peaks: Float32Array | null, duration: number, project: Project): string {
   const markers = project.markers ?? [];
+  const looped = loopedRange(list, project);
   const rows: string[] = [];
   // Rows of four bars, starting afresh at each marker, under its heading.
   let row: { bar: ChartBar; index: number }[] = [];
@@ -90,7 +91,7 @@ function barsMarkup(list: ChartBar[], peaks: Float32Array | null, duration: numb
     if (!row.length) return;
     rows.push(`<div class="chart-row">
       <span class="row-label" aria-hidden="true">${row[0].bar.number}</span>
-      <div class="row-bars">${row.map(({ bar, index }) => barMarkup(bar, index, peaks, duration)).join("")}</div>
+      <div class="row-bars">${row.map(({ bar, index }) => barMarkup(bar, index, peaks, duration, looped)).join("")}</div>
     </div>`);
     row = [];
   };
@@ -134,11 +135,47 @@ export function sectionLooped(project: Project, index: number, list: readonly Ch
   return region !== null && Math.abs(region.start - loop.start) < 0.01 && Math.abs(region.end - loop.end) < 0.01;
 }
 
-function barMarkup(bar: ChartBar, index: number, peaks: Float32Array | null, duration: number): string {
+/** The first and last indexes of the items inside the project's loop, and whether it is on. */
+interface LoopedRange {
+  first: number;
+  last: number;
+  enabled: boolean;
+}
+
+function loopedRange(list: readonly { start: number; end: number }[], project: Project): LoopedRange | null {
+  const loop = project.loop;
+  if (!loop || loop.end <= loop.start) return null;
+  let first = -1;
+  let last = -1;
+  list.forEach((item, index) => {
+    // A small tolerance, so a loop that ends on a bar line doesn't take the next bar.
+    if (item.start < loop.end - 0.01 && item.end > loop.start + 0.01) {
+      if (first < 0) first = index;
+      last = index;
+    }
+  });
+  return first < 0 ? null : { first, last, enabled: loop.enabled };
+}
+
+/** The classes marking a cell inside the loop. */
+function loopClasses(index: number, looped: LoopedRange | null): string {
+  if (!looped || index < looped.first || index > looped.last) return "";
+  return ` in-loop${looped.enabled ? "" : " off"}${index === looped.first ? " loop-start" : ""}${
+    index === looped.last ? " loop-end" : ""
+  }`;
+}
+
+function barMarkup(
+  bar: ChartBar,
+  index: number,
+  peaks: Float32Array | null,
+  duration: number,
+  looped: LoopedRange | null,
+): string {
   const levels = peaks ? peakSlices(peaks, duration, bar.start, bar.end, PEAKS_PER_BAR) : [];
   const names = bar.chords.join(" ");
   const label = `Bar ${bar.number}, ${names === "N.C." ? "no chord" : names}, ${formatTime(bar.start)}`;
-  return `<button class="bar-cell${names === "N.C." ? " rest" : ""}" data-action="bar-seek" data-index="${index}" aria-label="${
+  return `<button class="bar-cell${names === "N.C." ? " rest" : ""}${loopClasses(index, looped)}" data-action="bar-seek" data-index="${index}" aria-label="${
     escapeHtml(label)
   }">
       <span class="bar-peaks" aria-hidden="true">${
@@ -154,11 +191,14 @@ function barMarkup(bar: ChartBar, index: number, peaks: Float32Array | null, dur
 /** No beat grid: the chords in time order, each with its start time. */
 function segmentsMarkup(list: ChordSegment[], project: Project): string {
   const naming = chordNaming(project);
+  // A chord lasts until the next one starts.
+  const spans = list.map((chord, index) => ({ start: chord.start, end: list[index + 1]?.start ?? chord.end }));
+  const looped = loopedRange(spans, project);
   return `<p class="chart-note">${icon("music", 16)}<span>No steady beat was found, so there are no bars. Tap the tempo in Rhythm to make a grid.</span></p>
     <div class="segment-grid">${
     list.map((chord, index) => {
       const name = nameChord(chord, naming);
-      return `<button class="bar-cell segment" data-action="chord-seek" data-index="${index}" aria-label="${
+      return `<button class="bar-cell segment${loopClasses(index, looped)}" data-action="chord-seek" data-index="${index}" aria-label="${
         escapeHtml(`${name} at ${formatTime(chord.start)}`)
       }"><span class="bar-chord"><span>${escapeHtml(name)}</span></span><small>${formatTime(chord.start)}</small></button>`;
     }).join("")
