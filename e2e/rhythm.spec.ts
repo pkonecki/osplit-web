@@ -1,8 +1,10 @@
 import { expect, type Page, test } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import {
+  closePanel,
   instrument,
   openApp,
+  openPanel,
   readStore,
   seekTo,
   separateClip,
@@ -46,9 +48,12 @@ async function chipTempo(page: Page): Promise<number> {
 }
 
 async function press(page: Page, key: string): Promise<void> {
+  if (await page.locator(".panel:visible").count()) await closePanel(page);
   await page.locator("h1").click();
   await page.keyboard.press(key);
 }
+
+const position = (page: Page) => page.locator("#seek-bar").inputValue().then(Number);
 
 /** Zip entry names from a downloaded zip. */
 function zipEntries(bytes: Buffer): string[] {
@@ -78,23 +83,58 @@ test("finds the tempo, plays the click and loops bars", async ({ page }) => {
   expect(stored.bpm).toBeLessThan(121);
   expect(stored.bpmConfidence).toBeGreaterThanOrEqual(0.3);
   expect(stored.beats.length).toBeGreaterThan(15);
+  await expect(page.locator("#metre-chip")).toHaveText("4/4");
 
-  // The click row appears, off until turned on (C).
+  // The chart shows the bars: 2 s each.
+  const cells = page.locator(".bar-cell");
+  expect(await cells.count()).toBeGreaterThanOrEqual(4);
+
+  // The click row appears, off until turned on; the player's click button,
+  // the mixer's M and Rhythm's switch are one state.
   const clickRow = page.locator('[data-stem-row="click"]');
+  const clickMute = clickRow.locator('[data-action="mute"]');
+  const clickButton = page.locator('[data-action="click-button"]');
   await expect(clickRow).toBeVisible();
-  await expect(clickRow.locator('[data-action="mute"]')).toHaveClass(/muted/);
-  await press(page, "c");
-  await expect(clickRow.locator('[data-action="mute"]')).not.toHaveClass(/muted/);
+  await expect(clickMute).toHaveAttribute("aria-pressed", "true");
+  await expect(clickButton).toHaveAttribute("aria-pressed", "false");
+  await clickButton.click();
+  await expect(clickMute).toHaveAttribute("aria-pressed", "false");
+  await expect(clickButton).toHaveAttribute("aria-pressed", "true");
   await expect.poll(async () => (await project(page)).clickOn).toBe(true);
+  await openPanel(page, "rhythm");
+  await expect(page.locator('#panel-rhythm [data-action="click-toggle"]')).toBeChecked();
+  await page.locator('#panel-rhythm [data-action="click-toggle"]').uncheck();
+  await expect(clickMute).toHaveAttribute("aria-pressed", "true");
+  await clickMute.click();
+  await openPanel(page, "rhythm");
+  await expect(page.locator('#panel-rhythm [data-action="click-toggle"]')).toBeChecked();
+  // One volume too: the slider in Rhythm moves the mixer's.
+  await page.locator('#panel-rhythm [data-action="volume"][data-stem="click"]').fill("0.4");
+  await expect(clickRow.locator('[data-action="volume"]')).toHaveValue("0.4");
+  await expect(clickRow.locator("[data-volume-label]")).toHaveText("40%");
+  await closePanel(page);
 
   // Playing schedules a click on each beat, besides the five stems.
   await page.click('[data-action="play"]');
   await expect.poll(() => page.evaluate(() => window.__starts.length), { timeout: 5000 })
     .toBeGreaterThan(5 + 2);
+  await expect(page.locator("#bar-label")).toContainText("Bar");
   await page.click('[data-action="play"]');
+
+  // Bars: a click seeks to the bar, the buttons and ← / → step a bar.
+  await cells.nth(2).click();
+  const third = await position(page);
+  expect(third).toBeGreaterThan(3.5);
+  expect(third).toBeLessThan(4.5);
+  await expect(cells.nth(2)).toHaveAttribute("aria-current", "true");
+  await page.click('[data-action="bar-step"][data-step="1"]');
+  await expect.poll(() => position(page)).toBeCloseTo(third + 2, 0);
+  await press(page, "ArrowLeft");
+  await expect.poll(() => position(page)).toBeCloseTo(third, 0);
 
   // One bar from the playhead: 2 s at 120 BPM in 4/4.
   await seekTo(page, 4.6);
+  await openPanel(page, "loop");
   await page.click('[data-action="loop-bars"][data-bars="1"]');
   await expect.poll(async () => (await project(page)).loop?.enabled).toBe(true);
   let loop = (await project(page)).loop!;
@@ -102,47 +142,24 @@ test("finds the tempo, plays the click and loops bars", async ({ page }) => {
   expect(loop.end - loop.start).toBeLessThan(2.1);
   expect(loop.start).toBeLessThanOrEqual(4.6);
   expect(loop.end).toBeGreaterThan(4.6);
-  // B on a bar loop doubles it.
-  await press(page, "b");
-  await expect.poll(async () => {
-    const current = (await project(page)).loop!;
-    return current.end - current.start;
-  }).toBeGreaterThan(3.8);
-  loop = (await project(page)).loop!;
-  expect(loop.end - loop.start).toBeLessThan(4.2);
+  await expect(page.locator("#loop-chip-value")).toHaveText("1 bar");
+  await page.click('[data-action="loop-bars"][data-bars="2"]');
+  await expect(page.locator("#loop-chip-value")).toHaveText("2 bars");
+  await page.click('[data-action="loop-clear"]');
+  await closePanel(page);
 
-  // A dragged loop edge snaps to beats; Shift doesn't.
-  const beats = Array.from(stored.beats);
-  const nearestBeat = (time: number) =>
-    beats.reduce((best, beat) => Math.abs(beat - time) < Math.abs(best - time) ? beat : best);
-  const ruler = page.locator(".loop-ruler");
-  await ruler.scrollIntoViewIfNeeded();
-  const box = (await ruler.boundingBox())!;
-  const y = box.y + box.height / 2;
-  const dragEnd = async (to: number) => {
-    const handle = (await page.locator('[data-loop-handle="end"]').boundingBox())!;
-    const from = handle.x + handle.width / 2;
-    await page.mouse.move(from, y);
-    await page.mouse.down();
-    await page.mouse.move((from + box.x + box.width * to) / 2, y, { steps: 4 });
-    await page.mouse.move(box.x + box.width * to, y, { steps: 4 });
-    await page.mouse.up();
-  };
-  // The clip is 10 s; the loop is about 4–8 s. 6.25 s is between beats.
-  const target = 6.25;
-  await dragEnd(0.625);
-  await expect.poll(async () => (await project(page)).loop?.end)
-    .toBeCloseTo(nearestBeat(target), 2);
-  await page.keyboard.down("Shift");
-  await dragEnd(0.625);
-  await page.keyboard.up("Shift");
-  await expect.poll(async () => (await project(page)).loop?.end).toBeCloseTo(target, 1);
-  expect(Math.abs((await project(page)).loop!.end - nearestBeat(target))).toBeGreaterThan(0.1);
+  // Shift-click on a bar loops from the bar playing to it.
+  await cells.nth(0).click();
+  await cells.nth(2).click({ modifiers: ["Shift"] });
+  await expect.poll(async () => (await project(page)).loop?.enabled).toBe(true);
+  loop = (await project(page)).loop!;
+  expect(loop.end - loop.start).toBeGreaterThan(5.8);
+  expect(loop.end - loop.start).toBeLessThan(6.2);
 
   // Corrections: ×2, ÷2, beats per bar; saved with the analysis.
-  await page.click("#tempo-chip");
-  await expect(page.locator("#tempo-panel")).toBeVisible();
-  await expect(page.locator("#tempo-status")).toContainText("Detected 120 BPM");
+  await page.locator("#tempo-chip").click();
+  await expect(page.locator("#panel-rhythm")).toBeVisible();
+  await expect(page.locator("#tempo-status")).toContainText("Detected in the drums");
   await page.click('[data-action="tempo-factor"][data-factor="2"]');
   await expect.poll(() => chipTempo(page)).toBe(tempo * 2);
   await expect(page.locator('[data-action="tempo-factor"][data-factor="2"]')).toBeDisabled();
@@ -154,18 +171,24 @@ test("finds the tempo, plays the click and loops bars", async ({ page }) => {
   await expect(page.locator('[data-action="tempo-metre"][data-beats="3"]'))
     .toHaveAttribute("aria-pressed", "true");
   await expect.poll(async () => (await analysis(page)).edits?.beatsPerBar).toBe(3);
+  await expect(page.locator("#metre-chip")).toHaveText("3/4");
+  await page.click('[data-action="tempo-downbeat"][data-step="1"]');
+  await expect(page.locator("#downbeat-label")).toHaveText("1 beat later than detected");
   // The speed changes the tempo heard.
   await page.click('[data-action="tempo-reset"]');
   await expect.poll(async () => (await analysis(page)).edits).toEqual({});
+  await openPanel(page, "speed");
   await page.locator("#speed").fill("50");
   await expect(page.locator("#tempo-chip")).toContainText(`${tempo} → ${Math.round(tempo / 2)}`);
+  await expect(page.locator("#speed-bpm")).toHaveText(`${Math.round(tempo / 2)} BPM · original ${tempo}`);
 
   // Grid and click survive a reload, without analysing again.
   await page.reload();
   await expect(page.locator("#tempo-chip")).toContainText("BPM");
-  await expect(clickRow.locator('[data-action="mute"]')).not.toHaveClass(/muted/);
+  await expect(clickMute).toHaveAttribute("aria-pressed", "false");
 
   // Export all adds the click track.
+  await openPanel(page, "export");
   const download = page.waitForEvent("download");
   await page.click('[data-action="export-all"]');
   const names = zipEntries(readFileSync(await (await download).path()));
@@ -186,9 +209,10 @@ test("finds the tempo, plays the click and loops bars", async ({ page }) => {
     db.close();
   });
   await page.reload();
-  await expect(page.locator("#tempo-chip")).toHaveText("Find tempo");
+  const find = page.locator("#chord-chart").getByRole("button", { name: "Detect tempo, beats, key and chords" });
+  await expect(find).toBeVisible();
   await expect(clickRow).toHaveCount(0);
-  await page.click("#tempo-chip");
+  await find.click();
   await expect(page.locator("#tempo-chip")).toContainText("BPM", { timeout: 60_000 });
   await expect(clickRow).toBeVisible();
 });
@@ -198,10 +222,11 @@ test("no beat in steady tones; tap tempo makes a grid", async ({ page }, testInf
   writeTestClip(tones, 4);
   await openApp(page);
   await separateClip(page, "Tones", tones);
-  await expect(page.locator("#tempo-chip")).toHaveText("No beat found", { timeout: 60_000 });
+  await expect(page.locator("#tempo-chip")).toHaveText("No beat", { timeout: 60_000 });
   await expect(page.locator('[data-stem-row="click"]')).toHaveCount(0);
-  await expect(page.locator('[data-action="loop-bars"]').first()).toBeDisabled();
-  await page.click("#tempo-chip");
+  // Without a grid the click button opens Rhythm, to tap a tempo.
+  await page.click('[data-action="click-button"]');
+  await expect(page.locator("#panel-rhythm")).toBeVisible();
   await expect(page.locator("#tempo-status")).toContainText("No steady beat");
 
   // Five taps half a second apart: 120 BPM, with a beat on the last tap.
@@ -214,10 +239,12 @@ test("no beat in steady tones; tap tempo makes a grid", async ({ page }, testInf
   expect(tapped.tapped!.bpm).toBeGreaterThan(110);
   expect(tapped.tapped!.bpm).toBeLessThan(130);
   await expect(page.locator('[data-stem-row="click"]')).toBeVisible();
+  await openPanel(page, "loop");
   await expect(page.locator('[data-action="loop-bars"]').first()).toBeEnabled();
   // Undoing the taps brings back "no beat".
+  await openPanel(page, "rhythm");
   await page.click('[data-action="tempo-reset"]');
-  await expect(page.locator("#tempo-chip")).toHaveText("No beat found");
+  await expect(page.locator("#tempo-chip")).toHaveText("No beat");
   await expect(page.locator('[data-stem-row="click"]')).toHaveCount(0);
 });
 
@@ -230,7 +257,7 @@ test("click with streaming playback", async ({ page, context }) => {
   await openApp(page);
   await separateClip(page, "Streaming rhythm", clip);
   await expect(page.locator("#tempo-chip")).toContainText("BPM", { timeout: 60_000 });
-  await press(page, "c");
+  await page.click('[data-action="click-button"]');
   await page.click('[data-action="play"]');
   await expect.poll(() => page.evaluate(() => window.__audios.filter((a) => a.src).length))
     .toBe(5);

@@ -10,12 +10,20 @@ import {
   projectModel,
 } from "../types";
 import { escapeHtml } from "./format";
-import { renderMixer } from "./mixer";
+import { renderPractice } from "./practice-view";
 import { renderProgressView } from "./progress-view";
 import { footerMarkup, pageHeader } from "./shell";
 
+/** "Split again" on a separated project shows the source and model choices. */
+let setupOpen = false;
+
+export function setSetupOpen(open: boolean): void {
+  setupOpen = open;
+}
+
 export function renderDetail(project: Project): string {
   const complete = project.completedStems.length > 0;
+  if (complete && project.status !== "processing" && !setupOpen) return renderPractice(project);
   const gpu = knownGpu();
   const model = projectModel(project);
   // Saved with Demucs, opened where it cannot run: the stems stay, but a new
@@ -77,7 +85,11 @@ export function renderDetail(project: Project): string {
         : `<section class="empty-card compact"><h3>Add a source track</h3><p class="muted">Choose an audio file from this device to enable separation.</p></section>`
     }`
   }
-      ${complete && !splitting ? renderMixer(project) : ""}
+      ${
+    complete && !splitting
+      ? `<button class="button subtle" data-action="split-cancel">Back to practice</button>`
+      : ""
+  }
       ${
     splitting
       ? ""

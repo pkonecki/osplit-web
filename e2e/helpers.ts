@@ -322,7 +322,7 @@ export async function separateClip(
   clip: string,
 ): Promise<void> {
   await startSplit(page, name, clip);
-  await expect(page.locator('[data-action="export-mix"]')).toBeVisible({
+  await expect(page.locator('[data-action="play"]')).toBeVisible({
     timeout: SEPARATION_TIMEOUT,
   });
 }
@@ -333,4 +333,21 @@ export async function seekTo(page: Page, seconds: number): Promise<void> {
     input.value = String(value);
     input.dispatchEvent(new Event("input", { bubbles: true }));
   }, seconds);
+}
+
+/** Opens a practice panel (Speed, Key, Loop, Rhythm, Export) if it isn't open. */
+export async function openPanel(
+  page: Page,
+  name: "speed" | "key" | "loop" | "rhythm" | "export",
+): Promise<void> {
+  const panel = page.locator(`#panel-${name}`);
+  if (await panel.isVisible()) return;
+  await page.locator(`[data-action="panel"][data-panel="${name}"]:visible`).first().click();
+  await expect(panel).toBeVisible();
+}
+
+/** Closes the open practice panel. */
+export async function closePanel(page: Page): Promise<void> {
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".panel:visible")).toHaveCount(0);
 }

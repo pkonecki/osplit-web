@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import {
   createProjectWithClip,
+  openPanel,
   instrument,
   openApp,
   readStore,
@@ -156,7 +157,7 @@ test("separates a clip and mixes the stems", async ({ page }) => {
   const started = Date.now();
 
   await page.click('[data-action="separate"]');
-  await expect(page.locator('[data-action="export-mix"]')).toBeVisible({
+  await expect(page.locator('[data-action="play"]')).toBeVisible({
     timeout: SEPARATION_TIMEOUT,
   });
   const seconds = (Date.now() - started) / 1000;
@@ -240,6 +241,7 @@ test("separates a clip and mixes the stems", async ({ page }) => {
   expect(await page.evaluate(() => window.__gains[2].gain.value)).toBe(1);
 
   // Export one stem, as FLAC by default and as WAV when chosen.
+  await openPanel(page, "export");
   const flacDownload = page.waitForEvent("download");
   await page.click('[data-action="export-stem"][data-stem="vocals"]');
   const flac = await flacDownload;
@@ -257,6 +259,7 @@ test("separates a clip and mixes the stems", async ({ page }) => {
 
   // The choice is remembered, and also applies to the mix.
   await page.reload();
+  await openPanel(page, "export");
   await expect(page.locator('[data-action="export-format"]')).toHaveValue("wav");
   const mixDownload = page.waitForEvent("download");
   await page.click('[data-action="export-mix"]');
@@ -300,7 +303,7 @@ test("plays the stems sample-aligned through seeks and pauses", async ({ page })
   expect(await page.evaluate(() => window.__audios.length)).toBe(0);
 });
 
-test("mixer extras: solo, shortcuts, waveforms, media session and zip", async ({ page }) => {
+test("mixer extras: solo, presets, shortcuts, peaks, media session and zip", async ({ page }) => {
   await openApp(page);
   await separateClip(page, "Extras", clip);
   await expect(page.locator('[data-action="play"]')).toHaveAttribute("aria-label", "Play");
@@ -319,21 +322,17 @@ test("mixer extras: solo, shortcuts, waveforms, media session and zip", async ({
   const [saved] = await readStore<{ soloStems: string[] }>(page, "projects");
   expect(saved.soloStems).toEqual(["bass", "vocals"]);
 
-  // Keyboard: M and S act on the focused stem row.
-  await page.locator('[data-stem-row="vocals"]').focus();
-  await page.keyboard.press("m");
-  await expect(page.locator('[data-action="mute"][data-stem="vocals"]'))
-    .not.toHaveClass(/muted/);
-  expect(await gains()).toEqual([1, 0, 0, 1, 0]);
-  await expect(page.locator('[data-stem-row="vocals"]')).toBeFocused();
-  await page.keyboard.press("s");
-  await expect(page.locator('[data-action="solo"][data-stem="vocals"]'))
-    .toHaveAttribute("aria-pressed", "false");
-  await page.locator('[data-stem-row="bass"]').focus();
-  await page.keyboard.press("s");
-  await expect(page.locator('[data-action="solo"][data-stem="bass"]'))
-    .toHaveAttribute("aria-pressed", "false");
+  // Mix presets set mutes and solos; any change makes the mix custom.
+  await page.click('[data-action="mix-preset"][data-preset="drums-bass"]');
+  expect(await gains()).toEqual([0, 0, 1, 1, 0]);
+  await expect(page.locator('[data-action="mix-preset"][data-preset="drums-bass"]'))
+    .toHaveAttribute("aria-pressed", "true");
+  await page.click('[data-action="mute"][data-stem="drums"]');
+  await expect(page.locator('[data-action="mix-preset"][aria-pressed="true"]')).toHaveCount(0);
+  await page.click('[data-action="mix-preset"][data-preset="full"]');
   expect(await gains()).toEqual([1, 1, 1, 1, 1]);
+  expect((await readStore<{ soloStems: string[]; mutedStems: string[] }>(page, "projects"))[0])
+    .toMatchObject({ soloStems: [], mutedStems: [] });
 
   // Space plays and pauses; the arrows and Home move the position.
   await page.locator("h1").click();
@@ -350,6 +349,7 @@ test("mixer extras: solo, shortcuts, waveforms, media session and zip", async ({
   await page.keyboard.press("ArrowLeft");
   await expect.poll(async () => Number(await seekBar.inputValue())).toBe(0);
   // Typing in a field keeps its usual meaning.
+  await openPanel(page, "export");
   await page.selectOption('[data-action="export-format"]', "flac");
   await page.locator('[data-action="export-format"]').focus();
   await page.keyboard.press("Space");
@@ -360,27 +360,8 @@ test("mixer extras: solo, shortcuts, waveforms, media session and zip", async ({
   expect(await page.evaluate(() => navigator.mediaSession.metadata?.artist))
     .toBe("OSplit stems");
 
-  // Waveforms: drawn from the peaks saved with the separation; a click seeks.
-  const drawnPixels = (stem: string) =>
-    page.locator(`[data-waveform="${stem}"] canvas:not(.grid-canvas)`).evaluate((canvas: HTMLCanvasElement) => {
-      const data = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data;
-      let count = 0;
-      for (let i = 3; i < data.length; i += 4) if (data[i] > 0) count++;
-      return count;
-    });
-  await expect(page.locator(".waveform.drawn")).toHaveCount(5);
-  for (const stem of ["vocals", "piano", "drums", "bass", "other"]) {
-    expect(await drawnPixels(stem)).toBeGreaterThan(100);
-  }
+  // Peaks are saved with the separation, for the chord chart.
   expect(await readStore(page, "peaks")).toHaveLength(5);
-  const wave = page.locator('[data-waveform="drums"]');
-  await wave.scrollIntoViewIfNeeded();
-  const box = (await wave.boundingBox())!;
-  await page.mouse.click(box.x + box.width * 0.5, box.y + box.height / 2);
-  await expect.poll(async () => Number(await seekBar.inputValue())).toBeCloseTo(1.5, 1);
-  const playhead = await page.locator('[data-waveform="drums"] .playhead')
-    .evaluate((head: HTMLElement) => head.style.left);
-  expect(parseFloat(playhead)).toBeCloseTo(50, 0);
 
   // A project separated before waveforms existed gets them from playback.
   await page.evaluate(async () => {
@@ -396,11 +377,10 @@ test("mixer extras: solo, shortcuts, waveforms, media session and zip", async ({
     db.close();
   });
   await page.reload();
-  await expect(page.locator(".waveform.drawn")).toHaveCount(5);
-  expect(await drawnPixels("bass")).toBeGreaterThan(100);
   await expect.poll(async () => (await readStore(page, "peaks")).length).toBe(5);
 
   // Export all: a zip of the five stems and the mix.
+  await openPanel(page, "export");
   const download = page.waitForEvent("download");
   await page.click('[data-action="export-all"]');
   const zip = await download;
@@ -470,7 +450,7 @@ test("warns about a long track on a low-memory device", async ({ page, context }
     /This track is long for this device/,
   );
   // The warning goes away once the separation succeeds.
-  await expect(page.locator('[data-action="export-mix"]')).toBeVisible({
+  await expect(page.locator('[data-action="play"]')).toBeVisible({
     timeout: SEPARATION_TIMEOUT,
   });
   await expect(page.getByText("This track is long for this device")).toHaveCount(0);
@@ -507,7 +487,7 @@ test("a second tab sees a separation running in the first", async ({ page, conte
   // Only the tab running it can cancel it.
   await expect(second.locator('[data-action="cancel"]')).toHaveCount(0);
 
-  await expect(page.locator('[data-action="export-mix"]')).toBeVisible({
+  await expect(page.locator('[data-action="play"]')).toBeVisible({
     timeout: SEPARATION_TIMEOUT,
   });
   const statuses = (await readStore<{ status: string }>(page, "projects"))

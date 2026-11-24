@@ -33,7 +33,7 @@ test("cancels a split from the progress screen", async ({ page }) => {
   // Resume starts it again from the library.
   await row.getByRole("button", { name: "Resume Cancel me" }).click();
   await expect(page.locator("h1")).toHaveText("Cancel me");
-  await expect(page.locator('[data-action="export-mix"]')).toBeVisible({ timeout: SEPARATION_TIMEOUT });
+  await expect(page.locator('[data-action="play"]')).toBeVisible({ timeout: SEPARATION_TIMEOUT });
 });
 
 test("the library shows a split running in the background", async ({ page }) => {
@@ -54,7 +54,7 @@ test("the library shows a split running in the background", async ({ page }) => 
 
   await row.getByRole("button", { name: "Open Background" }).click();
   await expect(page.locator("#progress-card")).toBeVisible();
-  await expect(page.locator('[data-action="export-mix"]')).toBeVisible({ timeout: SEPARATION_TIMEOUT });
+  await expect(page.locator('[data-action="play"]')).toBeVisible({ timeout: SEPARATION_TIMEOUT });
   expect((await readStore<{ status: string }>(page, "projects"))[0].status).toBe("ready");
 });
 

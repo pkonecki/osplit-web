@@ -1,142 +1,104 @@
-import { exportAppliesPractice, exportFormat } from "../export";
-import { isNeutral } from "../practice";
+import { activeMixPreset, MIX_PRESETS } from "../mix-presets";
+import { icon } from "./icons";
 import { soloStems, stemVolume } from "../mixing";
-import { playerTime } from "../player";
 import { projectGrid } from "../tasks/analysis";
 import {
   ALL_STEMS,
   DEFAULT_CLICK_VOLUME,
+  MODEL_STEMS,
   type Project,
-  STEM_LABELS,
+  projectModel,
   stemLevel,
+  type Track,
+  TRACK_LABELS,
 } from "../types";
-import { formatTime } from "./format";
-import { chordLaneMarkup, chordNowMarkup } from "./harmony";
-import { loopRulerMarkup, practiceMarkup } from "./practice";
-import { overviewMarkup, updatePlayheads, waveformMarkup } from "./waveforms";
 
-export function renderMixer(project: Project): string {
-  const time = playerTime();
-  const format = exportFormat();
+/**
+ * The mixer: presets, then a row per stem (volume, mute, solo) and, once
+ * the beats are known, the click. The click's M is the same on/off as the
+ * click button in the player and the switch in Rhythm.
+ */
+
+export function mixerMarkup(project: Project): string {
+  const model = projectModel(project);
   return `
-    <section class="mixer-card">
-      <div class="mixer-title">
-        <h2>Project player &amp; mixer</h2>
-        <div class="export-actions">
-          <select class="export-format" data-action="export-format" aria-label="Export format">
-            <option value="flac" ${format === "flac" ? "selected" : ""}>FLAC · smaller, lossless</option>
-            <option value="wav" ${format === "wav" ? "selected" : ""}>WAV · most compatible</option>
-          </select>
-          <label class="check-row export-practice" ${
-    isNeutral(project) ? "hidden" : ""
-  }><input type="checkbox" data-action="export-practice" ${
-    exportAppliesPractice() ? "checked" : ""
-  } /> Mix with speed, key &amp; loop</label>
-          <button class="button outline" data-action="export-mix">Export full mix</button>
-          <button class="button outline" data-action="export-all">Export all (zip)</button>
-        </div>
+    <aside class="mixer-panel" id="mixer" aria-label="Mixer">
+      <div class="mixer-head">
+        <h2>Mixer</h2>
+        <span class="muted">${MODEL_STEMS[model].length} stems · ${model === "htdemucs-6s" ? "Demucs" : "Spleeter"}</span>
+        <button class="icon-button tablet-only mixer-close" data-action="mixer-toggle" aria-label="Close the mixer">${icon("close", 18)}</button>
       </div>
-      <div class="player-row">
-        <button class="play-button" data-action="play" aria-label="${
-    playLabel(time)
-  }" ${time.ready ? "" : "disabled"}>${playGlyph(time)}</button>
-        <div class="seek-area">
-          <input id="seek-bar" type="range" min="0" step="any" max="${time.duration}" value="${time.position}" ${
-    time.duration ? "" : "disabled"
-  } aria-label="Seek" />
-          <div class="time-row"><span id="current-time">${
-    formatTime(time.position)
-  }</span><span id="total-time">${formatTime(time.duration)}</span></div>
-        </div>
-      </div>
-      ${practiceMarkup(project)}
-      ${chordNowMarkup()}
-      ${overviewMarkup()}
-      ${loopRulerMarkup()}
-      ${chordLaneMarkup()}
-      <div class="stem-list">
-        ${
-    ALL_STEMS.filter((stem) => project.completedStems.includes(stem)).map((
-      stem,
-    ) => `
-          <div class="stem-control" tabindex="0" data-stem-row="${stem}" aria-label="${
-      STEM_LABELS[stem]
-    } (M to mute, S to solo)">
-            <span class="stem-label">${STEM_LABELS[stem]}</span>
-            <input type="range" min="0" max="1" step="0.01" value="${
-      stemLevel(project, stem)
-    }" data-action="volume" data-stem="${stem}" aria-label="${
-      STEM_LABELS[stem]
-    } volume" ${project.mutedStems.includes(stem) ? "disabled" : ""} />
-            <button class="solo-button ${
-      soloStems(project).includes(stem) ? "soloed" : ""
-    }" data-action="solo" data-stem="${stem}" aria-pressed="${
-      soloStems(project).includes(stem)
-    }" aria-label="Solo ${STEM_LABELS[stem]}">S</button>
-            <button class="mute-button ${
-      project.mutedStems.includes(stem) ? "muted" : ""
-    }" data-action="mute" data-stem="${stem}" aria-label="${
-      project.mutedStems.includes(stem) ? "Unmute" : "Mute"
-    } ${STEM_LABELS[stem]}">${
-      project.mutedStems.includes(stem) ? "◖×" : "◖))"
-    }</button>
-            <button class="button text-button" data-action="export-stem" data-stem="${stem}">Export</button>
-            ${waveformMarkup(stem, stemVolume(project, stem) === 0)}
+      <div class="mix-presets" role="group" aria-label="Mix presets">${
+    MIX_PRESETS.map((preset) =>
+      `<button class="chip" data-action="mix-preset" data-preset="${preset.id}" aria-pressed="false">${preset.label}</button>`
+    ).join("")
+  }</div>
+      <div class="stem-rows">${stemRowsMarkup(project)}</div>
+    </aside>`;
+}
+
+/** The stem rows, and the click's once the beats are known. */
+export function stemRowsMarkup(project: Project): string {
+  const stems = ALL_STEMS.filter((stem) => project.completedStems.includes(stem));
+  return stems.map((stem) => rowMarkup(project, stem)).join("") +
+    (projectGrid(project.id) ? rowMarkup(project, "click") : "");
+}
+
+function rowMarkup(project: Project, track: Track): string {
+  const label = TRACK_LABELS[track];
+  const volume = track === "click" ? project.clickVolume ?? DEFAULT_CLICK_VOLUME : stemLevel(project, track);
+  return `
+        <div class="stem-row stem-${track}" data-stem-row="${track}" role="group" aria-label="${label}">
+          <div class="stem-row-head">
+            <span class="stem-dot" aria-hidden="true"></span>
+            <span class="stem-name">${label}</span>
+            <span class="slider-value" data-volume-label="${track}">${Math.round(volume * 100)}%</span>
+            <button class="ms-button" data-action="mute" data-stem="${track}" aria-pressed="false" aria-label="Mute ${label}">M</button>
+            <button class="ms-button solo" data-action="solo" data-stem="${track}" aria-pressed="false" aria-label="Solo ${label}">S</button>
           </div>
-        `).join("")
+          <input type="range" min="0" max="1" step="0.01" value="${volume}" data-action="volume" data-stem="${track}" aria-label="${label} volume" />
+        </div>`;
+}
+
+/** Updates mutes, solos, volumes and the preset chips, in place. */
+export function updateMixer(project: Project): void {
+  const solos = soloStems(project);
+  for (const row of document.querySelectorAll<HTMLElement>("[data-stem-row]")) {
+    const track = row.dataset.stemRow as Track;
+    // The click is "muted" while it is off.
+    const muted = track === "click" ? project.clickOn !== true : project.mutedStems.includes(track as never);
+    const soloed = solos.includes(track);
+    const mute = row.querySelector<HTMLButtonElement>('[data-action="mute"]');
+    const solo = row.querySelector<HTMLButtonElement>('[data-action="solo"]');
+    mute?.setAttribute("aria-pressed", String(muted));
+    mute?.classList.toggle("on", muted);
+    if (mute) {
+      mute.setAttribute("aria-label", `${muted ? "Unmute" : "Mute"} ${TRACK_LABELS[track]}`);
+    }
+    solo?.setAttribute("aria-pressed", String(soloed));
+    solo?.classList.toggle("on", soloed);
+    row.classList.toggle("silent", stemVolume(project, track) === 0);
   }
-        ${projectGrid(project.id) ? clickRowMarkup(project) : ""}
-      </div>
-    </section>
-  `;
-}
-
-/** The click track's mixer row: muted (off) until turned on. */
-function clickRowMarkup(project: Project): string {
-  const on = project.clickOn === true;
-  const soloed = soloStems(project).includes("click");
-  return `
-          <div class="stem-control click-row" tabindex="0" data-stem-row="click" aria-label="Click (C or M to turn on or off, S to solo)">
-            <span class="stem-label">Click</span>
-            <input type="range" min="0" max="1" step="0.01" value="${
-    project.clickVolume ?? DEFAULT_CLICK_VOLUME
-  }" data-action="volume" data-stem="click" aria-label="Click volume" ${on ? "" : "disabled"} />
-            <button class="solo-button ${soloed ? "soloed" : ""}" data-action="solo" data-stem="click" aria-pressed="${soloed}" aria-label="Solo Click">S</button>
-            <button class="mute-button ${on ? "" : "muted"}" data-action="mute" data-stem="click" aria-label="${
-    on ? "Mute" : "Unmute"
-  } Click">${on ? "◖))" : "◖×"}</button>
-            <button class="button text-button" data-action="export-stem" data-stem="click">Export</button>
-            ${waveformMarkup("click", stemVolume(project, "click") === 0)}
-          </div>
-  `;
-}
-
-export function updatePlayerDisplay(): void {
-  const range = document.querySelector<HTMLInputElement>("#seek-bar");
-  const current = document.querySelector<HTMLElement>("#current-time");
-  const total = document.querySelector<HTMLElement>("#total-time");
-  const play = document.querySelector<HTMLButtonElement>(
-    '[data-action="play"]',
-  );
-  if (!range || !current || !total || !play) return;
-  const time = playerTime();
-  range.max = String(time.duration);
-  if (document.activeElement !== range) range.value = String(time.position);
-  range.disabled = !time.duration;
-  current.textContent = formatTime(time.position);
-  total.textContent = formatTime(time.duration);
-  play.textContent = playGlyph(time);
-  play.setAttribute("aria-label", playLabel(time));
-  play.disabled = !time.ready;
-  updatePlayheads();
-}
-
-function playGlyph(time: ReturnType<typeof playerTime>): string {
-  if (!time.ready) return "…";
-  return time.playing ? "Ⅱ" : "▶";
-}
-
-function playLabel(time: ReturnType<typeof playerTime>): string {
-  if (!time.ready) return "Loading stems";
-  return time.playing ? "Pause" : "Play";
+  // Every volume slider of a track (the click has two: here and in Rhythm).
+  for (const slider of document.querySelectorAll<HTMLInputElement>('input[data-action="volume"]')) {
+    const track = slider.dataset.stem as Track;
+    const volume = track === "click" ? project.clickVolume ?? DEFAULT_CLICK_VOLUME : stemLevel(project, track);
+    if (document.activeElement !== slider) slider.value = String(volume);
+    slider.disabled = track === "click" ? project.clickOn !== true : project.mutedStems.includes(track as never);
+  }
+  for (const label of document.querySelectorAll<HTMLElement>("[data-volume-label]")) {
+    const track = label.dataset.volumeLabel as Track;
+    const volume = track === "click" ? project.clickVolume ?? DEFAULT_CLICK_VOLUME : stemLevel(project, track);
+    label.textContent = `${Math.round(volume * 100)}%`;
+  }
+  const preset = activeMixPreset(project);
+  for (const chip of document.querySelectorAll<HTMLElement>('[data-action="mix-preset"]')) {
+    const on = chip.dataset.preset === preset?.id;
+    chip.classList.toggle("on", on);
+    chip.setAttribute("aria-pressed", String(on));
+  }
+  for (const button of document.querySelectorAll<HTMLElement>('[data-action="click-button"]')) {
+    button.setAttribute("aria-pressed", String(project.clickOn === true));
+    button.classList.toggle("on", project.clickOn === true);
+  }
 }

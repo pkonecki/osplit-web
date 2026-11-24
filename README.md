@@ -188,26 +188,36 @@ requests (`connect-src https:`).
 
 ## Practice tools
 
-The project player can slow down or speed up a track (50–150%) without
+A separated project opens on its practice view: the chord chart in the
+middle, the mixer beside it (the **Mixer** tab on a phone, a panel that opens
+and closes on a narrow desktop window), and the player at the bottom.
+Above the chart, chips open the **Speed**, **Key** and **Loop** panels:
+popovers on a desktop, sheets from the bottom on a phone. The player's click
+button turns the click on or off; the arrow beside it (on a phone, a long
+press, or the tempo line under the title) opens **Rhythm**.
+
+The player can slow down or speed up a track (50–150%, with presets) without
 changing its pitch, shift its key (±12 semitones) without changing its speed,
 and repeat an A–B loop. Speed, key and loop are saved with each project.
 
-- **Loop:** the Loop button (or `L`) loops 4 bars from the playhead (4 s
-  without a beat grid) when there is no loop, and otherwise turns it on or
-  off. A and B set the start and end at the playhead. While the loop is on,
-  drag its edges on the ruler, chords or waveforms to adjust it, or drag
-  inside it on the bar ruler to move it, keeping its length; a click still
-  seeks. Seeking after the loop end jumps to the loop start.
-- **Zoom:** the overview strip above the ruler shows the whole track and the
-  part in view. Scroll on it to zoom, and drag it to move along. On the
-  lanes, drag to move along, Ctrl/⌘ + scroll or pinch to zoom, and scroll
-  sideways to move along; a plain scroll still scrolls the page. The
-  buttons beside the overview zoom in and out, show the whole track, or
-  frame the loop. While playing, the view jumps ahead when the playhead
-  reaches its edge.
-- **Export:** with *Mix with speed, key & loop* ticked in the mixer, the
-  exported mix (alone or in the zip) uses the project's speed and key, and
-  covers only the loop when it is on. Stem exports are never changed.
+- **Chord chart:** the song in bars of the beat grid, four a row (eight a
+  line on a wide window), with the chords of each bar and the song's peaks
+  behind them. The bar playing is highlighted with its beats, and the chart
+  follows it while playing. Click a bar to go to it; Shift-click a bar to
+  loop from the bar playing to that one. Without a beat grid, the chart lists
+  the chords in time order.
+- **Loop:** the Loop button in the player (or `L`) loops 4 bars from the
+  playhead (4 s without a beat grid) when there is no loop, and otherwise
+  turns it on or off. The Loop panel sets A and B at the playhead, loops 1,
+  2, 4 or 8 bars from the playhead, and clears the loop. The loop shows on the
+  seek bar. Seeking after the loop end jumps to the loop start.
+- **Mixer:** a volume, mute and solo for each stem and, once the beats are
+  known, the click. *Full mix*, *No vocals* and *Drums + bass* set the mutes
+  and volumes in one go; any change after that makes the mix custom.
+- **Export:** the Export panel exports the mix, one stem, all stems (zip) or
+  the chords. With *With speed, key & loop* on, the exported mix (alone or in
+  the zip) uses the project's speed and key, and covers only the loop when it
+  is on. Stem exports are never changed.
 
 Key and speed changes go through a pitch shifter,
 [Signalsmith Stretch](https://signalsmith-audio.co.uk/code/stretch/) (MIT),
@@ -223,28 +233,23 @@ back to the loop start leaves a short gap.
 
 After each separation, OSplit finds the tempo, the beats and the bar starts
 in the stems, on the device, in a worker (a few seconds for a 4-minute track).
-Projects separated before this ask for it with **Find tempo** in the practice
-bar. The analysis is stored with the project and redone when its stems
+Projects separated before this offer to detect it in the chord chart. The analysis is stored with the project and redone when its stems
 change.
 
-- **Tempo chip:** shows the tempo, and the tempo heard at the current speed
-  (for example "♩ 120 → 102 BPM" at 85%). It opens a panel to correct the
-  grid: ×2 / ÷2, 3 or 4 beats per bar, move the bar start a beat earlier or
-  later, tap the tempo, undo the corrections, or analyze again.
-- **Beat grid:** beats and bar lines are drawn over the waveforms, with bar
-  numbers in the strip above the stems.
-- **Snapping and bar loops:** dragged loop edges snap to the nearest beat
-  (hold Alt for bars, Shift for no snapping). The *Bars* buttons loop 1, 2 or
-  4 bars from the bar at the playhead.
-- **Click:** a click track on every beat, accented on bar starts, with its own
-  row in the mixer (volume, solo, on/off; off by default). It follows the
-  speed and the loop, is added to the exported mix when it is heard, and goes
-  in the zip as `<name>-click.<format>`.
+- **Tempo:** the header shows the tempo, and the tempo heard at the current
+  speed (for example "120 → 102 BPM" at 85%). The Rhythm panel corrects the
+  grid: ×2 / ÷2, 3 or 4 beats per measure, bar 1 a beat earlier or later, tap
+  the tempo, use the detected tempo again, or detect it again.
+- **Click:** a click track on every beat, accented on bar starts, off by
+  default. The click button in the player, the switch in Rhythm and the M of
+  the Click row in the mixer are the same on/off, and Rhythm's volume is the
+  Click row's. It follows the speed and the loop, is added to the exported
+  mix when it is heard, and goes in the zip as `<name>-click.<format>`.
 
 Accuracy: the analysis follows the drum stem (all stems when the drums are
 silent) and tracks tempo drift in live playing. Half or double tempo errors
 happen; ×2 / ÷2 is one click away. Music without a steady pulse shows *No
-beat found*, or a low-confidence grid that loops don't snap to; tap tempo
+beat*, or a low-confidence grid marked with a question mark; tap tempo
 replaces it with an even grid. With decoded playback the click is
 sample-accurate; with streaming playback it can be some 30 ms off, as the
 position of streaming audio is reported less precisely. A browser tab in the
@@ -258,17 +263,15 @@ stems helps here: percussion is the main source of noise when telling notes
 apart. The tuning is measured first, so songs tuned to A = 432 Hz or a little
 off still work.
 
-- **Key chip:** shows the key, and the key heard with the key shift (for
-  example "A minor → B minor (+2)"). The key − / + buttons name the key they
-  lead to. The chip opens a panel with the second most likely key (often the
-  relative major or minor), a list to set the key yourself, *Show as
-  original / transposed* for the chord names, and the exports.
-- **Chord display:** the chord at the playhead, large, and the next one with
-  the beats to go ("→ F in 2").
-- **Chord lane:** under the bar ruler, a box per chord, aligned with the
-  waveforms. Click a box to go to it; double-click it to loop it.
-- **Export:** *Export chords (.txt)* writes a chord sheet, four bars a line
-  (`| Am    | F     | C     | G     |`), named as shown. *Export .lab* writes
+- **Key:** the header shows the song's key, and the key heard with the key
+  shift (for example "A minor → B minor"). The Key panel shifts the key with
+  − / + or a grid of the twelve keys, sets the song's key yourself (or picks
+  the second most likely key, often the relative major or minor), and has
+  *Show chords in the new key*; off, the chords keep their original names.
+- **Chords now:** beside the chips, the chord at the playhead, large, and the
+  next three.
+- **Export:** *Chord chart (.txt)* writes a chord sheet, four bars a line
+  (`| Am    | F     | C     | G     |`), named as shown. *.lab file* writes
   `start end label` lines (MIREX format, such as `A:min`) for DAWs and
   analysis tools.
 
@@ -278,26 +281,19 @@ diminished chords show as their nearest triad. A key can be confused with
 its relative major or minor (shown as the alternative) or a neighbour on the
 circle of fifths; set it in the panel if so. Modal, atonal or very sparse
 music shows *Key unclear*. A key change held for 16 bars or more is listed in
-the panel. Screen readers don't announce every chord change unless *Announce
-chord changes* is ticked.
+the panel.
 
-Keyboard shortcuts on a project page (not while typing in a field):
+Keyboard shortcuts on the practice view (not while typing in a field or on a
+focused slider):
 
 | Key | Action |
 | --- | --- |
 | Space | Play or pause |
-| ← / → | Seek 5 s back or forward |
+| ← / → | Previous or next bar (5 s without a beat grid) |
+| ↑ / ↓ | Speed +5% / −5% |
+| L | Turn the loop on or off (makes one when there is none) |
 | Home | Back to the start |
-| M / S | Mute or solo the focused stem row |
-| `-` / `=` | Speed −5% / +5% |
-| `,` / `.` | Key down / up a semitone |
-| `0` | Reset speed and key |
-| `[` / `]` | Set the loop start / end at the playhead |
-| L / Shift+L | Turn the loop on or off / clear it |
-| ← / → on a loop handle | Move it 0.1 s (Shift: 1 s) |
-| B | Loop the current bar; again to double the loop |
-| C | Turn the click on or off |
-| T | Tap the tempo (with the tempo panel open) |
+| Esc | Close the open panel |
 
 ## Installing the app
 
