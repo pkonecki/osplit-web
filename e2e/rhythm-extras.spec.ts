@@ -53,6 +53,7 @@ test("time signature, accent, subdivision and count-in", async ({ page }) => {
   await closePanel(page);
   await page.evaluate(() => {
     window.__starts = [];
+    window.__earlyStops = [];
   });
   await page.click('[data-action="play"]');
   await expect(page.locator('[data-action="play"]')).toHaveAttribute("aria-label", "Stop the count-in");
@@ -61,6 +62,8 @@ test("time signature, accent, subdivision and count-in", async ({ page }) => {
   // Count-in clicks (4 beats, 8ths: 8) play although the click is off.
   expect((await page.evaluate(() => window.__starts.length))).toBeGreaterThanOrEqual(8);
   await expect(page.locator('[data-action="play"]')).toHaveAttribute("aria-label", "Pause", { timeout: 5000 });
+  // None of them was cut off before it played: every beat of the bar is heard.
+  expect(await page.evaluate(() => window.__earlyStops)).toEqual([]);
   await expect.poll(() => position(page)).toBeGreaterThan(0.2);
   await page.click('[data-action="play"]');
 });

@@ -95,6 +95,8 @@ declare global {
       loopStart: number;
       loopEnd: number;
     }[];
+    /** Sources stopped before they began playing (when they were due, in audio-clock seconds). */
+    __earlyStops: number[];
     /** Where the stems' bus was last connected: straight out or the shifter. */
     __routes: ("direct" | "shifter")[];
   }
@@ -130,9 +132,17 @@ export function instrument(): void {
       loopStart: this.loopStart,
       loopEnd: this.loopEnd,
     });
+    (this as AudioBufferSourceNode & { __when?: number }).__when = when ?? 0;
     return duration === undefined
       ? start.call(this, when, offset)
       : start.call(this, when, offset, duration);
+  };
+  window.__earlyStops = [];
+  const stop = AudioBufferSourceNode.prototype.stop;
+  AudioBufferSourceNode.prototype.stop = function (when?: number) {
+    const due = (this as AudioBufferSourceNode & { __when?: number }).__when;
+    if (due !== undefined && this.context.currentTime < due) window.__earlyStops.push(due);
+    return stop.call(this, when);
   };
   window.__routes = [];
   const connect = AudioNode.prototype.connect as (

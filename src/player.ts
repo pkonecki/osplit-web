@@ -106,6 +106,7 @@ export function countingIn(): boolean {
 
 function stopCountIn(): void {
   if (!countIn) return;
+  click?.stopCountIn();
   window.clearTimeout(countIn.timer);
   countIn.resolve();
   countIn = null;
