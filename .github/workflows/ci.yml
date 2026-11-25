@@ -98,7 +98,7 @@ jobs:
           BASE_PATH=/osplit-web/ deno task build --outDir dist-pages
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ hashFiles('deno.lock') }}
@@ -193,7 +193,7 @@ jobs:
         run: deno install --frozen
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ hashFiles('deno.lock') }}
