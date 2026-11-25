@@ -725,7 +725,9 @@ export async function handlePracticeKey(event: KeyboardEvent): Promise<void> {
   if (!current) return;
   if (event.ctrlKey || event.metaKey || event.altKey) return;
   const target = event.target as HTMLElement;
-  if (target.closest("input, select, textarea, [contenteditable], dialog")) return;
+  // Sliders keep their arrow keys but have no use for Space: it still plays.
+  const spaceOnSlider = event.key === " " && target.matches('input[type="range"]') && !target.closest("dialog");
+  if (!spaceOnSlider && target.closest("input, select, textarea, [contenteditable], dialog")) return;
   if (!playerTime().ready) return;
   switch (event.key) {
     case " ":
