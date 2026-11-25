@@ -361,6 +361,17 @@ test("mixer extras: solo, presets, shortcuts, peaks, media session and zip", asy
   await expect(page.locator('[data-action="play"]')).toHaveAttribute("aria-label", "Play");
   await muteVocals.click();
   await expect(muteVocals).toHaveAttribute("aria-pressed", "false");
+  // And on a volume slider just moved, whose arrow keys still move it.
+  const slider = page.locator('#mixer input[type="range"]').first();
+  await slider.focus();
+  const before = Number(await slider.inputValue());
+  await page.keyboard.press("ArrowLeft");
+  await expect.poll(async () => Number(await slider.inputValue())).toBeLessThan(before);
+  await page.keyboard.press("Space");
+  await expect(page.locator('[data-action="play"]')).toHaveAttribute("aria-label", "Pause");
+  await page.keyboard.press("Space");
+  await expect(page.locator('[data-action="play"]')).toHaveAttribute("aria-label", "Play");
+  await page.locator("h1").click();
   const seekBar = page.locator("#seek-bar");
   await page.keyboard.press("Home");
   await expect.poll(async () => Number(await seekBar.inputValue())).toBe(0);
