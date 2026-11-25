@@ -46,6 +46,12 @@ test("phone: chart and mixer tabs, sheets from the bottom", async ({ page }) => 
   expect(box.y + box.height).toBeGreaterThan(840);
   await page.mouse.click(195, 40);
   await expect(sheet).toBeHidden();
+  // Back closes a sheet, staying in the project.
+  await page.locator('[data-action="panel"][data-panel="speed"]').click();
+  await expect(sheet).toBeVisible();
+  await page.goBack();
+  await expect(sheet).toBeHidden();
+  await expect(page.locator("h1")).toHaveText("Pocket practice");
 
   // Export from its tab; Rhythm from the line under the title.
   await tabs.getByRole("button", { name: "Export" }).click();

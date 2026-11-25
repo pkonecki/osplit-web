@@ -59,7 +59,8 @@ export async function takeSharedFile(): Promise<File | null> {
   const url = new URL(location.href);
   if (!url.searchParams.has("shared")) return null;
   url.searchParams.delete("shared");
-  history.replaceState(null, "", url);
+  // Keeps the entry's state (the page it stands for).
+  history.replaceState(history.state, "", url);
   if (!("caches" in window)) return null;
   const cache = await caches.open(INBOX_CACHE);
   const key = appUrl("inbox");

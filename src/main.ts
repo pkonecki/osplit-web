@@ -75,7 +75,8 @@ import { renderDetail, setSetupOpen } from "./view/detail";
 import { choiceDialog, confirmDialog, textDialog } from "./view/dialog";
 import { type MenuItem, openMenu } from "./view/menu";
 import { conflictDialog } from "./view/cloud";
-import { setPanel } from "./view/panels";
+import { openPanel, setPanel } from "./view/panels";
+import { installNavigation, placeShown } from "./navigation";
 import { captureForm, restoreForm } from "./view/form-state";
 import { describeError, escapeHtml, formatBytes } from "./view/format";
 import { applyLibraryFilter, library, renderProjects } from "./view/projects";
@@ -141,6 +142,27 @@ async function uploadWhenDone(id: string): Promise<void> {
   await uploadToCloud(id);
 }
 installWakeLock();
+// Back and Forward move between the app's pages instead of leaving it.
+installNavigation(async (place, from) => {
+  // Back first closes an open panel or sheet.
+  if (openPanel()) {
+    setPanel(null);
+    return false;
+  }
+  if (from.startsWith("project:") && place !== from && urlTaskActive()) {
+    showMessage("Wait for the download or cancel it before leaving this project.");
+    return false;
+  }
+  try {
+    if (place.startsWith("project:")) await openProject(place.slice("project:".length));
+    else await leaveProject(place === "settings" ? "settings" : "library");
+  } catch (error) {
+    // A project deleted since: the library instead.
+    await leaveProject("library");
+    showError(error);
+  }
+  return true;
+});
 void start();
 
 async function start(): Promise<void> {
@@ -339,6 +361,7 @@ async function render(): Promise<void> {
     root!.innerHTML = shellMarkup("project", renderDetail(state.selectedProject));
     renderedView = `project:${state.selectedProject.id}`;
     restoreForm(snapshot, renderedView);
+    placeShown(renderedView);
     // Loading the player (decoding the stems) runs in the background; the
     // play button shows the loading state until it is ready.
     void preparePlayers(state.selectedProject).catch(showError);
@@ -358,11 +381,13 @@ async function render(): Promise<void> {
     root!.innerHTML = shellMarkup("settings", await renderSettings());
     renderedView = "settings";
     restoreForm(snapshot, renderedView);
+    placeShown("settings");
   } else {
     releasePlayers();
     root!.innerHTML = shellMarkup("library", await renderProjects());
     renderedView = "projects";
     restoreForm(snapshot, renderedView);
+    placeShown("library");
     applyLibraryFilter();
   }
 }
