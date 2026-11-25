@@ -102,6 +102,12 @@ export class ClickScheduler {
   private holdUntil = 0;
   private lastWhen = -Infinity;
   private scheduled: { when: number; source: AudioBufferSourceNode }[] = [];
+  /**
+   * The count-in's clicks, apart from the click track's: those are dropped
+   * whenever the click restarts or stops (it isn't playing yet during the
+   * count-in), which would cut the count-in after its first beat.
+   */
+  private countInSources: AudioBufferSourceNode[] = [];
 
   constructor(
     context: AudioContext,
@@ -136,13 +142,27 @@ export class ClickScheduler {
     const gain = this.context.createGain();
     gain.gain.value = this.level > 0 ? this.level : 0.8;
     gain.connect(this.destination);
+    this.stopCountIn();
     for (const click of countInClicks(beatsPerBar, beatSeconds, bars, start, this.options)) {
       const source = new AudioBufferSourceNode(this.context, { buffer: output.buffers[click.kind] });
       source.connect(gain);
       source.start(click.when);
-      this.scheduled.push({ when: click.when, source });
+      this.countInSources.push(source);
     }
-    return start + bars * beatsPerBar * beatSeconds;
+    const end = start + bars * beatsPerBar * beatSeconds;
+    // Let go of the nodes once the last click has played.
+    const sources = this.countInSources;
+    window.setTimeout(() => {
+      if (this.countInSources === sources) this.countInSources = [];
+      gain.disconnect();
+    }, (end - this.context.currentTime + 1) * 1000);
+    return end;
+  }
+
+  /** Stops the count-in's clicks not yet heard (the count-in was stopped). */
+  stopCountIn(): void {
+    stopSources(this.countInSources);
+    this.countInSources = [];
   }
 
   setLevel(level: number): void {
@@ -222,16 +242,20 @@ export class ClickScheduler {
 
   /** Stops clicks scheduled but not yet heard. */
   private cancel(): void {
-    for (const { source } of this.scheduled) {
-      try {
-        source.stop();
-      } catch {
-        // Already ended.
-      }
-      source.disconnect();
-    }
+    stopSources(this.scheduled.map(({ source }) => source));
     this.scheduled = [];
     this.lastWhen = -Infinity;
+  }
+}
+
+function stopSources(sources: AudioBufferSourceNode[]): void {
+  for (const source of sources) {
+    try {
+      source.stop();
+    } catch {
+      // Already ended.
+    }
+    source.disconnect();
   }
 }
 
