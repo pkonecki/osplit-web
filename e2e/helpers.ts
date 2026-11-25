@@ -229,7 +229,12 @@ export async function addEmptyProject(
     });
     db.close();
   }, { name, model });
-  await page.reload();
+  // The app may still be stepping back in history (leaving a project does),
+  // which aborts a reload started meanwhile: reload again then.
+  await page.reload().catch(async () => {
+    await page.waitForLoadState();
+    await page.reload();
+  });
   await page.waitForFunction(() => crossOriginIsolated);
   // The page may reopen the last project; go to the library first.
   const home = page.locator('[data-action="home"]:visible');

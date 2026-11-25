@@ -211,7 +211,8 @@ export async function finishSignIn(): Promise<string | null> {
   for (const key of ["code", "state", "error", "error_description", "scope", "session_state"]) {
     url.searchParams.delete(key);
   }
-  history.replaceState(null, "", url);
+  // Keeps the entry's state (the page it stands for).
+  history.replaceState(history.state, "", url);
   if (!pending) return "The sign-in didn't come from this tab. Connect again.";
   const label = PROVIDER_LABELS[pending.provider];
   const config = configFor(pending.provider);
